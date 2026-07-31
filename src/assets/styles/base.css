@@ -1,0 +1,177 @@
+/* ============================================================================
+   BASE — SAATF FRONT
+   Reemplaza la base del starter de Vite (que era oscura y centrada).
+   Fondo claro, pensado para tablets/Surface en horizontal. Sube tamaños
+   táctiles respecto al theme para dedos, no para ratón.
+   Depende de los tokens definidos en theme.css.
+   ============================================================================ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+body {
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  line-height: var(--line-height-normal);
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: var(--line-height-tight);
+}
+
+a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+a:hover { color: var(--primary-dark); }
+
+/* ---- Ajustes táctiles para tablet (sobre los componentes del theme) ---- */
+.c-btn { min-height: 48px; font-size: var(--font-size-md); }
+.c-btn--lg { min-height: 56px; padding: 15px 28px; font-size: var(--font-size-lg); }
+.c-btn--sm { min-height: 40px; }
+
+/* Variante que el theme no trae: botón outline en rojo (cancelar). */
+.c-btn--outline-danger {
+  background-color: transparent;
+  color: var(--danger-color);
+  border-color: var(--danger-border);
+}
+.c-btn--outline-danger:hover { background-color: var(--danger-subtle); border-color: var(--danger-color); color: var(--danger-dark); }
+
+.c-input,
+.c-select,
+.c-textarea {
+  min-height: 48px;
+  font-size: var(--font-size-md);
+}
+
+/* ---- Utilidades de layout propias de la app ---- */
+.app-shell {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app-main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: var(--container-2xl);
+  margin: 0 auto;
+  padding: var(--spacing-2xl) var(--spacing-3xl);
+}
+
+/* Centro para pantallas tipo login */
+.app-center {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+}
+
+/* Barra de acciones fija al pie del wizard */
+.app-actionbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg) var(--spacing-3xl);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -4px 14px rgba(20, 30, 50, 0.05);
+}
+
+/* Grid de tarjetas seleccionables (trámites, medios de entrega) */
+.select-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+/* Tarjeta seleccionable grande (táctil) */
+.select-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  text-align: left;
+  padding: var(--spacing-xl);
+  min-height: 110px;
+  background: var(--bg-primary);
+  border: 1.5px solid var(--border-color-medium);
+  border-radius: var(--border-radius-lg);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
+}
+.select-card:hover { border-color: var(--primary-light); box-shadow: var(--shadow-sm); }
+.select-card.is-selected {
+  border-color: var(--primary-color);
+  background: var(--primary-subtle);
+  box-shadow: var(--shadow-focus);
+}
+.select-card__title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
+.select-card__meta { font-size: var(--font-size-sm); color: var(--text-tertiary); }
+
+/* Numeración de pasos (stepper).
+   NOTA: se usan modificadores propios (--active/--done), NO la utilidad global
+   .is-active del theme (que trae !important y pintaría todo el item). */
+.stepper { display: flex; align-items: center; gap: var(--spacing-sm); }
+.stepper__item {
+  display: inline-flex; align-items: center; gap: var(--spacing-sm);
+  padding: 6px 16px 6px 6px;
+  border-radius: var(--border-radius-full);
+  transition: background-color var(--transition-fast);
+}
+.stepper__dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--bg-tertiary); color: var(--text-tertiary);
+  font-weight: var(--font-weight-semibold); font-size: var(--font-size-base);
+  line-height: 1; border: 1.5px solid var(--border-color-medium);
+  flex: 0 0 auto;
+}
+.stepper__label {
+  font-size: var(--font-size-sm); color: var(--text-tertiary);
+  font-weight: var(--font-weight-medium); white-space: nowrap;
+}
+.stepper__item--active { background: var(--primary-subtle); }
+.stepper__item--active .stepper__dot { background: var(--primary-color); color: #fff; border-color: var(--primary-color); }
+.stepper__item--active .stepper__label { color: var(--primary-color); font-weight: var(--font-weight-semibold); }
+.stepper__item--done .stepper__dot { background: var(--success-color); color: #fff; border-color: var(--success-color); }
+.stepper__item--done .stepper__label { color: var(--text-secondary); }
+.stepper__sep { flex: 1 1 24px; height: 1.5px; background: var(--border-color); min-width: 16px; }
+
+/* Folio grande para mostrar el ticket */
+.folio-display {
+  font-family: var(--font-family-mono);
+  font-size: 56px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.12em;
+  color: var(--primary-color);
+  text-align: center;
+}
+
+/* ---- Impresión: solo el ticket ---- */
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+}
+.print-only { display: none; }

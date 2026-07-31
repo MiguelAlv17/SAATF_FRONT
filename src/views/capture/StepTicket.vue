@@ -1,0 +1,117 @@
+<script setup>
+import { computed } from 'vue'
+import { useAtencionStore } from '../../stores/atencion'
+import AppIcon from '../../components/ui/AppIcon.vue'
+import { formatFechaHora, formatMonto } from '../../utils/format'
+
+const props = defineProps({
+  // Formulario compartido con el padre: { medio, monto, telefono }
+  form: { type: Object, required: true },
+  mostrarErrores: { type: Boolean, default: false },
+})
+
+const atencion = useAtencionStore()
+const emitido = computed(() => !!atencion.folio)
+const telefonoMal = computed(() =>
+  props.form.medio === 'whatsapp' && !/^\d{10}$/.test(String(props.form.telefono || '').replace(/\D/g, ''))
+)
+
+function imprimir() {
+  window.print()
+}
+</script>
+
+<template>
+  <section>
+    <!-- ANTES de emitir: elegir medio + monto -->
+    <template v-if="!emitido">
+      <header class="step-head">
+        <h2 class="step-title">Generar folio</h2>
+        <p class="step-desc">Elige cómo se entrega el ticket al ciudadano.</p>
+      </header>
+
+      <div class="select-grid medios">
+        <button type="button" class="select-card" :class="{ 'is-selected': form.medio === 'impresion' }" @click="form.medio = 'impresion'">
+          <AppIcon name="print" :size="26" />
+          <span class="select-card__title">Impresión</span>
+          <span class="select-card__meta">Ticket impreso</span>
+        </button>
+        <button type="button" class="select-card" :class="{ 'is-selected': form.medio === 'whatsapp' }" @click="form.medio = 'whatsapp'">
+          <AppIcon name="whatsapp" :size="26" />
+          <span class="select-card__title">WhatsApp</span>
+          <span class="select-card__meta">Envío al teléfono</span>
+        </button>
+      </div>
+
+      <div class="form-row u-mt-5">
+        <div v-if="form.medio === 'whatsapp'" class="c-field">
+          <label class="c-label" for="tel">Teléfono (10 dígitos)</label>
+          <input id="tel" class="c-input" type="tel" v-model="form.telefono" maxlength="10"
+            placeholder="55 0000 0000" :class="{ 'is-invalid': mostrarErrores && telefonoMal }" />
+          <span class="c-hint">No se almacena; solo se usa para enviar el ticket.</span>
+        </div>
+
+        <div class="c-field">
+          <label class="c-label" for="monto">Monto a cobrar (opcional)</label>
+          <input id="monto" class="c-input" type="number" min="0" step="0.01" v-model="form.monto" placeholder="0.00" />
+          <span class="c-hint">Déjalo vacío si el monto se define por otra regla.</span>
+        </div>
+      </div>
+    </template>
+
+    <!-- DESPUÉS de emitir: folio + ticket -->
+    <template v-else>
+      <div class="folio-result u-anim-scale">
+        <div class="c-badge c-badge--success u-mb-3">
+          <AppIcon name="check" :size="14" /> Folio generado
+        </div>
+        <p class="folio-label">Folio</p>
+        <p class="folio-display">{{ atencion.folio }}</p>
+
+        <div class="ticket-meta">
+          <div><span>Trámite</span><strong>{{ atencion.ticket?.tramite || atencion.tramite?.nombre }}</strong></div>
+          <div><span>Monto</span><strong>{{ formatMonto(atencion.monto) }}</strong></div>
+          <div><span>Válido hasta</span><strong>{{ formatFechaHora(atencion.vigenciaHasta) }}</strong></div>
+        </div>
+
+        <button v-if="form.medio === 'impresion'" class="c-btn c-btn--primary c-btn--lg u-mt-4 no-print" type="button" @click="imprimir">
+          <AppIcon name="print" :size="18" /> Imprimir ticket
+        </button>
+        <div v-else class="c-alert c-alert--success u-mt-4 no-print">
+          <AppIcon name="whatsapp" :size="18" /> El ticket se envió por WhatsApp.
+        </div>
+      </div>
+
+      <!-- Bloque solo para impresión -->
+      <div class="print-only ticket-print">
+        <h2>SAATF — Ticket de atención</h2>
+        <p class="ticket-print__folio">{{ atencion.folio }}</p>
+        <p>Trámite: {{ atencion.ticket?.tramite || atencion.tramite?.nombre }}</p>
+        <p>Monto: {{ formatMonto(atencion.monto) }}</p>
+        <p>Válido hasta: {{ formatFechaHora(atencion.vigenciaHasta) }}</p>
+        <p class="ticket-print__hint">Presenta este folio en el kiosco antes de la hora de vigencia.</p>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.step-head { margin-bottom: var(--spacing-2xl); }
+.step-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); }
+.step-desc { margin: var(--spacing-xs) 0 0; color: var(--text-tertiary); font-size: var(--font-size-md); }
+.medios { grid-template-columns: repeat(2, minmax(0, 260px)); }
+.medios .select-card { align-items: center; text-align: center; }
+.form-row { display: flex; gap: var(--spacing-2xl); flex-wrap: wrap; }
+.form-row .c-field { flex: 1 1 260px; }
+
+.folio-result { text-align: center; padding: var(--spacing-3xl); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); }
+.folio-label { margin: 0; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); font-size: var(--font-size-xs); }
+.ticket-meta { display: flex; justify-content: center; gap: var(--spacing-4xl); flex-wrap: wrap; margin-top: var(--spacing-xl); }
+.ticket-meta div { display: flex; flex-direction: column; gap: 2px; }
+.ticket-meta span { font-size: var(--font-size-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); }
+.ticket-meta strong { font-size: var(--font-size-lg); color: var(--text-primary); }
+
+.ticket-print { text-align: center; font-family: var(--font-family-mono); padding: 12px; }
+.ticket-print__folio { font-size: 40px; font-weight: bold; letter-spacing: 0.15em; margin: 12px 0; }
+.ticket-print__hint { margin-top: 16px; font-size: 12px; }
+</style>

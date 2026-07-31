@@ -1,0 +1,254 @@
+{
+  "info": {
+    "_postman_id": "b2d9f0c1-8a3e-4c6b-9d21-saatf0000001",
+    "name": "SAATF — API de captura",
+    "description": "Colección del front web de captura del Sistema de Atención Anticipada de Trámites en Fila (SAATF).\n\nFlujo: Login → Catálogo → Crear atención → Seleccionar trámite → Guardar datos → Finalizar → Ticket (o Cancelar).\n\n**Uso rápido:**\n1. Selecciona el environment \"SAATF QA\" (o usa las variables de la colección).\n2. Ejecuta \"Login\": guarda el `token` y el `kioscoCapturaId` automáticamente.\n3. Ejecuta las llamadas del flujo en orden; \"Crear atención\" guarda el `atencionId` solo.\n\nTodas las respuestas usan el sobre `{ exito, codigo, mensaje, data }`. Programa contra `codigo`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Aserción común: la respuesta trae el sobre estándar.",
+          "try {",
+          "  const body = pm.response.json();",
+          "  pm.test('Tiene sobre {exito, codigo, mensaje}', function () {",
+          "    pm.expect(body).to.have.property('exito');",
+          "    pm.expect(body).to.have.property('codigo');",
+          "  });",
+          "} catch (e) { /* respuestas sin JSON */ }"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://api.saatf.qa.payfri-bi.com", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "atencionId", "value": "", "type": "string" },
+    { "key": "tramiteId", "value": "2", "type": "string" },
+    { "key": "kioscoCapturaId", "value": "1975", "type": "string" },
+    { "key": "folio", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Autenticación",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metodo\": \"correo\",\n  \"usuario\": \"facilitador@ejemplo.com\",\n  \"contrasena\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "`metodo`: `correo` o `empleado`.\n\nGuarda el `token` para las siguientes llamadas. El token expira por inactividad (`inactividadMin`).\n\nErrores: 400 MSG-AUT-004 (faltan datos), 401 MSG-AUT-003 (credenciales inválidas), 503 MSG-AUT-005 (auth no disponible)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.exito && body.data && body.data.token) {",
+                  "  pm.collectionVariables.set('token', body.data.token);",
+                  "  if (body.data.facilitador && body.data.facilitador.kioscoActual != null) {",
+                  "    pm.collectionVariables.set('kioscoCapturaId', String(body.data.facilitador.kioscoActual));",
+                  "  }",
+                  "  console.log('Token guardado. Expira:', body.data.expiracion);",
+                  "} else {",
+                  "  console.warn('Login sin token:', body && body.codigo, body && body.mensaje);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "logout"]
+            },
+            "description": "Registra el cierre de sesión. El front igual debe borrar el token localmente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('token', '');", "console.log('Token limpiado.');"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Catálogos",
+      "item": [
+        {
+          "name": "Trámites habilitados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalogos/tramites",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "catalogos", "tramites"]
+            },
+            "description": "Trámites habilitados y ordenados. `capturaPropia:true` → tiene formulario propio (`esquemaCampos`). `requiereCurp`/`requiereActa` indican datos necesarios."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Flujo de captura",
+      "item": [
+        {
+          "name": "3.1 Crear atención",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kioscoCapturaId\": {{kioscoCapturaId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones"]
+            },
+            "description": "`kioscoCapturaId` es opcional. Guarda el `atencionId` devuelto (se guarda solo en la variable).\n\n**409 MSG-ATF-002** si el facilitador ya tiene una atención activa: finaliza o cancela la anterior antes de crear otra."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.exito && body.data && body.data.atencionId != null) {",
+                  "  pm.collectionVariables.set('atencionId', String(body.data.atencionId));",
+                  "  console.log('atencionId guardado:', body.data.atencionId, 'estado:', body.data.estado);",
+                  "} else {",
+                  "  console.warn('No se creó atención:', body && body.codigo, body && body.mensaje);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Seleccionar trámite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tramiteId\": {{tramiteId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones/{{atencionId}}/tramite",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones", "{{atencionId}}", "tramite"]
+            },
+            "description": "Solo válido mientras la atención está en `en_captura`. Errores posibles: MSG-TRA-001 (trámite no habilitado), MSG-ATF-004 (transición no válida)."
+          }
+        },
+        {
+          "name": "3.3 Guardar datos",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"curp\": \"PEXJ800101HDFRXN00\",\n  \"datos\": {\n    \"campoA\": \"valor\",\n    \"campoB\": 123\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones/{{atencionId}}/datos",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones", "{{atencionId}}", "datos"]
+            },
+            "description": "`curp` opcional (si el trámite lo requiere). `datos` es objeto libre validado contra `esquemaCampos`. Se puede llamar varias veces."
+          }
+        },
+        {
+          "name": "3.4 Finalizar captura",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones/{{atencionId}}/finalizar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones", "{{atencionId}}", "finalizar"]
+            },
+            "description": "Sin body. Valida datos completos y pasa a `capturada`. Si falta trámite/datos: MSG-TRA-008 (faltan obligatorios)."
+          }
+        },
+        {
+          "name": "3.5 Generar ticket (folio)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"medioEntrega\": \"impresion\",\n  \"monto\": 95.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones/{{atencionId}}/ticket",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones", "{{atencionId}}", "ticket"]
+            },
+            "description": "`medioEntrega`: `impresion` o `whatsapp`. `monto` opcional. Devuelve `folio` (8 chars, con dígito verificador) y el objeto `ticket`. La atención queda `disponible` hasta `vigenciaHasta`.\n\nErrores: MSG-TIC-002 (info incompleta), MSG-TIC-003 (error generando folio)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.exito && body.data && body.data.folio) {",
+                  "  pm.collectionVariables.set('folio', body.data.folio);",
+                  "  console.log('Folio:', body.data.folio, 'vigencia:', body.data.vigenciaHasta);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.6 Cancelar atención",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/atenciones/{{atencionId}}/cancelar",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "atenciones", "{{atencionId}}", "cancelar"]
+            },
+            "description": "Sin body. Solo se puede cancelar ANTES de generar el ticket (mientras está `en_captura`)."
+          }
+        }
+      ]
+    }
+  ]
+}
