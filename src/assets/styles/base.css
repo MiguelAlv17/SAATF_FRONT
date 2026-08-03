@@ -168,10 +168,16 @@ a:hover { color: var(--primary-dark); }
   text-align: center;
 }
 
-/* ---- Impresión: solo el ticket ---- */
+/* ---- Impresión: solo el ticket, se oculta todo lo demás ---- */
+.print-ticket { display: none; }
+.print-ticket__folio {
+  font-family: var(--font-family-mono);
+  font-size: 40px; font-weight: var(--font-weight-bold);
+  letter-spacing: 0.15em; margin: 12px 0;
+}
 @media print {
   body { background: #fff; }
-  .no-print { display: none !important; }
-  .print-only { display: block !important; }
+  body * { visibility: hidden !important; }
+  .print-ticket { display: block !important; position: absolute; left: 0; top: 0; width: 100%; text-align: center; font-family: var(--font-family-mono); }
+  .print-ticket, .print-ticket * { visibility: visible !important; }
 }
-.print-only { display: none; }

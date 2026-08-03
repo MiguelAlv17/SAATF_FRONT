@@ -1,22 +1,10 @@
 <script setup>
 import { computed } from 'vue'
 import { useAtencionStore } from '../../stores/atencion'
-import { normalizarEsquema } from '../../utils/esquema'
 
 const atencion = useAtencionStore()
 const tramite = computed(() => atencion.tramite)
-const campos = computed(() => normalizarEsquema(tramite.value?.esquemaCampos))
-
-// Filas a mostrar: CURP (si aplica) + campos con valor.
-const filas = computed(() => {
-  const rows = []
-  if (tramite.value?.requiereCurp) rows.push({ etiqueta: 'CURP', valor: atencion.curp || '—' })
-  for (const c of campos.value) {
-    const v = atencion.datos?.[c.clave]
-    rows.push({ etiqueta: c.etiqueta, valor: v === undefined || v === '' ? '—' : String(v) })
-  }
-  return rows
-})
+const filas = computed(() => atencion.resumen || [])
 </script>
 
 <template>
@@ -32,7 +20,7 @@ const filas = computed(() => {
         <span class="resumen__v">{{ tramite?.nombre }}</span>
       </div>
       <div v-for="(f, i) in filas" :key="i" class="resumen__row">
-        <span class="resumen__k">{{ f.etiqueta }}</span>
+        <span class="resumen__k">{{ f.label }}</span>
         <span class="resumen__v">{{ f.valor }}</span>
       </div>
     </div>
@@ -51,6 +39,6 @@ const filas = computed(() => {
 .resumen__row { display: flex; gap: var(--spacing-lg); padding: var(--spacing-md) var(--spacing-xl); border-bottom: 1px solid var(--border-color-light); }
 .resumen__row:last-child { border-bottom: none; }
 .resumen__row--head { background: var(--bg-secondary); }
-.resumen__k { flex: 0 0 200px; color: var(--text-tertiary); font-weight: var(--font-weight-medium); }
+.resumen__k { flex: 0 0 220px; color: var(--text-tertiary); font-weight: var(--font-weight-medium); }
 .resumen__v { flex: 1 1 auto; color: var(--text-primary); font-weight: var(--font-weight-medium); word-break: break-word; }
 </style>

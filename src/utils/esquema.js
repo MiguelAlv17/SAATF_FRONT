@@ -1,59 +1,137 @@
-// Normaliza el `esquemaCampos` de un trámite a una forma estable para el
-// formulario dinámico. El .md no fija la estructura exacta, así que aceptamos
-// varias formas comunes (arreglo directo, { campos: [...] }) y varios alias de
-// nombres de propiedad. Cuando tengamos un esquema real, se ajusta aquí.
+// Parseo de `esquemaCampos` para el formulario dinámico.
+// Soporta las tres formas del catálogo: Modos, Ramificado y Campos simples.
+// Ver guía: SAATF_Front_Parseo_Esquema.md
 
-const TIPOS_VALIDOS = ['text', 'number', 'email', 'tel', 'date', 'select', 'textarea', 'checkbox']
-
-function pick(obj, keys, def) {
-  for (const k of keys) if (obj[k] !== undefined && obj[k] !== null) return obj[k]
-  return def
+// ---------------------------------------------------------------------------
+// Detección de forma
+// ---------------------------------------------------------------------------
+export function detectarForma(esquema) {
+  if (!esquema || typeof esquema !== 'object') return 'vacio'
+  if (esquema.modos) return 'modos'
+  if (esquema.tipos) return 'ramificado'
+  if (esquema.campos) return 'simple'
+  return 'vacio'
 }
 
-function normalizarCampo(raw, i) {
-  const clave = pick(raw, ['clave', 'key', 'nombre', 'name', 'id'], `campo_${i}`)
-  let tipo = String(pick(raw, ['tipo', 'type'], 'text')).toLowerCase()
-  if (!TIPOS_VALIDOS.includes(tipo)) tipo = 'text'
-  const opcionesRaw = pick(raw, ['opciones', 'options', 'valores'], [])
-  const opciones = (Array.isArray(opcionesRaw) ? opcionesRaw : []).map((o) =>
-    typeof o === 'object' ? { valor: pick(o, ['valor', 'value', 'id'], ''), etiqueta: pick(o, ['etiqueta', 'label', 'texto'], '') } : { valor: o, etiqueta: String(o) }
-  )
+// ---------------------------------------------------------------------------
+// Normalización de un campo individual
+// ---------------------------------------------------------------------------
+const TIPOS = ['texto', 'numero', 'fecha', 'select', 'curp', 'placa']
+
+export function normalizarCampo(raw, i = 0) {
+  const tipo = String(raw?.tipo ?? 'texto').toLowerCase()
   return {
-    clave: String(clave),
-    etiqueta: pick(raw, ['etiqueta', 'label', 'titulo'], String(clave)),
-    tipo,
-    requerido: !!pick(raw, ['requerido', 'required', 'obligatorio'], false),
-    placeholder: pick(raw, ['placeholder', 'ejemplo'], ''),
-    ayuda: pick(raw, ['ayuda', 'hint', 'descripcion'], ''),
-    opciones,
-    max: pick(raw, ['max', 'maximo', 'maxLength'], null),
-    min: pick(raw, ['min', 'minimo', 'minLength'], null),
+    key: String(raw?.key ?? raw?.clave ?? `campo_${i}`),
+    label: raw?.label ?? raw?.etiqueta ?? String(raw?.key ?? ''),
+    tipo: TIPOS.includes(tipo) ? tipo : 'texto',
+    obligatorio: !!raw?.obligatorio,
+    maxLength: raw?.maxLength ?? null,
+    formato: raw?.formato ?? null,
+    opciones: normalizarOpciones(raw?.opciones),
+    valorFijo: raw?.valorFijo !== undefined ? raw.valorFijo : null,
+    oculto: !!raw?.oculto,
+    ayuda: raw?.ayuda ?? '',
   }
 }
 
-// Devuelve un arreglo de campos normalizados (posiblemente vacío).
-export function normalizarEsquema(esquemaCampos) {
-  if (!esquemaCampos) return []
-  let raw = esquemaCampos
-  if (typeof raw === 'string') {
-    try { raw = JSON.parse(raw) } catch { return [] }
-  }
-  const lista = Array.isArray(raw) ? raw : (Array.isArray(raw.campos) ? raw.campos : (Array.isArray(raw.fields) ? raw.fields : []))
-  return lista.map(normalizarCampo)
+// Opciones de un select. Acepta arreglo de strings o de objetos { valor, label }.
+// Conserva el tipo del `valor` (número o string) — importante para casos como
+// `opcion` de matrimonio (1/2).
+export function normalizarOpciones(op) {
+  if (!Array.isArray(op)) return []
+  return op.map((o) =>
+    o && typeof o === 'object'
+      ? { valor: o.valor ?? o.value ?? o.id, label: String(o.label ?? o.etiqueta ?? o.valor ?? '') }
+      : { valor: o, label: String(o) }
+  )
 }
 
-// Valida los datos capturados contra los campos. Devuelve arreglo de claves faltantes.
-export function camposFaltantes(campos, datos) {
-  return campos
-    .filter((c) => c.requerido)
-    .filter((c) => {
-      const v = datos?.[c.clave]
-      return v === undefined || v === null || String(v).trim() === ''
-    })
-    .map((c) => c.clave)
+export function normalizarCampos(lista) {
+  return (Array.isArray(lista) ? lista : []).map(normalizarCampo)
+}
+
+// ---------------------------------------------------------------------------
+// Claves anidadas: "solicitante.nombre" → { solicitante: { nombre: ... } }
+// ---------------------------------------------------------------------------
+export function asignarRuta(obj, ruta, valor) {
+  const partes = String(ruta).split('.')
+  let cur = obj
+  for (let i = 0; i < partes.length - 1; i++) {
+    const p = partes[i]
+    if (typeof cur[p] !== 'object' || cur[p] === null) cur[p] = {}
+    cur = cur[p]
+  }
+  cur[partes[partes.length - 1]] = valor
+  return obj
+}
+
+// ---------------------------------------------------------------------------
+// Fechas: el <input type="date"> entrega "yyyy-MM-dd"; se convierte al formato
+// que pide el campo (dd/MM/yyyy o yyyy-MM-dd).
+// ---------------------------------------------------------------------------
+export function formatearFecha(valorISO, formato) {
+  if (!valorISO) return valorISO
+  const m = String(valorISO).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return valorISO
+  const [, y, mo, d] = m
+  if (formato === 'dd/MM/yyyy') return `${d}/${mo}/${y}`
+  if (formato === 'yyyy-MM-dd') return `${y}-${mo}-${d}`
+  return valorISO
+}
+
+// ---------------------------------------------------------------------------
+// Construcción del objeto `datos` a partir de los campos activos + valores.
+// - Respeta claves anidadas.
+// - Incluye ocultos con `valorFijo`.
+// - Convierte fechas al formato del campo y numeros a Number.
+// - Omite opcionales vacíos.
+// `extra` son llaves planas de nivel superior (ej. { modo } o { tipoActa }).
+// ---------------------------------------------------------------------------
+export function construirDatos(campos, valores, extra = {}) {
+  const datos = {}
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined && v !== null && v !== '') asignarRuta(datos, k, v)
+  }
+  for (const c of campos) {
+    let v
+    if (c.oculto && c.valorFijo !== null && c.valorFijo !== undefined) {
+      v = c.valorFijo
+    } else {
+      v = valores[c.key]
+    }
+    if (v === undefined || v === null || v === '') continue
+    if (c.tipo === 'fecha') v = formatearFecha(v, c.formato)
+    else if (c.tipo === 'numero') v = Number(v)
+    asignarRuta(datos, c.key, v)
+  }
+  return datos
+}
+
+// ---------------------------------------------------------------------------
+// Validación de obligatorios. Devuelve arreglo de campos faltantes/ inválidos.
+// Los ocultos (con valorFijo) se consideran satisfechos.
+// ---------------------------------------------------------------------------
+export function validarCampos(campos, valores) {
+  const faltan = []
+  for (const c of campos) {
+    if (c.oculto) continue
+    const v = valores[c.key]
+    const vacio = v === undefined || v === null || String(v).trim() === ''
+    if (c.obligatorio && vacio) { faltan.push(c); continue }
+    if (c.tipo === 'curp' && !vacio && !curpValida(v)) faltan.push(c)
+  }
+  return faltan
 }
 
 // Validación básica de CURP (18 caracteres alfanuméricos en mayúsculas).
 export function curpValida(curp) {
   return /^[A-Z0-9]{18}$/.test(String(curp || '').toUpperCase())
+}
+
+// Busca un valor de teléfono entre los campos capturados (por key o label),
+// para reutilizarlo como número de WhatsApp en el ticket. Devuelve solo dígitos.
+export function valorTelefono(campos, valores) {
+  const c = campos.find((x) => /(^|\.)tel[eé]fono$/i.test(x.key) || /tel[eé]fono/i.test(x.label))
+  if (!c) return ''
+  return String(valores[c.key] || '').replace(/\D/g, '').slice(0, 10)
 }

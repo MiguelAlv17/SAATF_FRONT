@@ -8,7 +8,8 @@ export const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 export const STORAGE_KEYS = {
   token: 'saatf.token',
   session: 'saatf.session',
+  atencion: 'saatf.atencion',
 }
 
 // Minutos de inactividad por defecto si el login no lo especifica.
-export const DEFAULT_INACTIVITY_MIN = 15
+export const DEFAULT_INACTIVITY_MIN = 60

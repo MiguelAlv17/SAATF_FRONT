@@ -3,7 +3,7 @@
 import { useAuthStore } from '../../stores/auth'
 import AppIcon from './../ui/AppIcon.vue'
 
-const emit = defineEmits(['logout'])
+const emit = defineEmits(['logout', 'ver-atenciones'])
 const auth = useAuthStore()
 </script>
 
@@ -22,6 +22,10 @@ const auth = useAuthStore()
           <span v-if="auth.kioscoActual" class="topbar__kiosco">Kiosco {{ auth.kioscoActual }}</span>
         </div>
       </div>
+      <button class="c-btn c-btn--ghost" type="button" @click="emit('ver-atenciones')">
+        <AppIcon name="list" :size="18" />
+        <span>Atenciones</span>
+      </button>
       <button class="c-btn c-btn--ghost" type="button" @click="emit('logout')">
         <AppIcon name="logout" :size="18" />
         <span>Salir</span>

@@ -1,7 +1,13 @@
 <script setup>
-import { computed } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { useAtencionStore } from '../../stores/atencion'
-import { normalizarEsquema, camposFaltantes, curpValida } from '../../utils/esquema'
+import {
+  detectarForma, normalizarCampos, normalizarOpciones,
+  construirDatos, validarCampos, valorTelefono,
+} from '../../utils/esquema'
+import CampoDinamico from './CampoDinamico.vue'
+import ConsultaCurp from './ConsultaCurp.vue'
+import AppIcon from '../../components/ui/AppIcon.vue'
 
 const props = defineProps({
   mostrarErrores: { type: Boolean, default: false },
@@ -9,85 +15,242 @@ const props = defineProps({
 
 const atencion = useAtencionStore()
 const tramite = computed(() => atencion.tramite)
-const campos = computed(() => normalizarEsquema(tramite.value?.esquemaCampos))
-const requiereCurp = computed(() => !!tramite.value?.requiereCurp)
+const esquema = computed(() => tramite.value?.esquemaCampos || null)
+const forma = computed(() => detectarForma(esquema.value))
+// La ayuda de consulta CURP (gob.mx) va SOLO en el trámite de consulta de CURP.
+const esConsultaCurp = computed(() => tramite.value?.clave === 'consulta_curp')
 
-// Trámite sin formulario propio y sin CURP: se resuelve con servicios externos.
-const sinCaptura = computed(() => !requiereCurp.value && campos.value.length === 0)
+// --- Estado de captura ---
+const modoActivo = ref('')
+const tipoActivo = ref('')
+const valores = reactive({})
 
-const faltantes = computed(() => camposFaltantes(campos.value, atencion.datos))
-const curpMal = computed(() => requiereCurp.value && !curpValida(atencion.curp))
-
-function esInvalido(clave) {
-  return props.mostrarErrores && faltantes.value.includes(clave)
+// Rehidrata el borrador guardado (formulario a medio llenar), si existe.
+{
+  const d = atencion.draft
+  if (d && typeof d === 'object') {
+    if (d.modoActivo) modoActivo.value = d.modoActivo
+    if (d.tipoActivo) tipoActivo.value = d.tipoActivo
+    if (d.valores && typeof d.valores === 'object') Object.assign(valores, d.valores)
+  }
 }
+
+// --- Modos ---
+const modos = computed(() => {
+  if (forma.value !== 'modos') return []
+  return Object.entries(esquema.value.modos).map(([key, m]) => ({
+    key, label: m.label || key, campos: normalizarCampos(m.campos),
+  }))
+})
+
+// --- Ramificado ---
+const camposComunes = computed(() => (forma.value === 'ramificado' ? normalizarCampos(esquema.value.camposComunes) : []))
+const selectorTipo = computed(() => (forma.value === 'ramificado' ? esquema.value.selectorTipo || null : null))
+const tiposOpciones = computed(() => (selectorTipo.value ? normalizarOpciones(selectorTipo.value.opciones) : []))
+const camposTipo = computed(() => {
+  if (forma.value !== 'ramificado' || !tipoActivo.value) return []
+  return normalizarCampos(esquema.value.tipos?.[tipoActivo.value]?.campos)
+})
+
+// --- Simple ---
+const camposSimples = computed(() => (forma.value === 'simple' ? normalizarCampos(esquema.value.campos) : []))
+
+// Todos los campos relevantes (incluye ocultos) según la forma.
+const camposActivos = computed(() => {
+  if (forma.value === 'modos') return modos.value.find((x) => x.key === modoActivo.value)?.campos || []
+  if (forma.value === 'ramificado') return [...camposComunes.value, ...camposTipo.value]
+  if (forma.value === 'simple') return camposSimples.value
+  return []
+})
+
+// Visibles (sin ocultos) para renderizar.
+const camposComunesVis = computed(() => camposComunes.value.filter((c) => !c.oculto))
+const camposTipoVis = computed(() => camposTipo.value.filter((c) => !c.oculto))
+const camposActivosVis = computed(() => camposActivos.value.filter((c) => !c.oculto))
+
+// Inicializa el primer modo si hay varios (o el único).
+watch(modos, (m) => {
+  if (forma.value === 'modos' && !modoActivo.value && m.length) modoActivo.value = m[0].key
+}, { immediate: true })
+
+// Siembra los ocultos con valorFijo en los valores.
+watch(camposActivos, (campos) => {
+  for (const c of campos) {
+    if (c.oculto && c.valorFijo !== null && c.valorFijo !== undefined && valores[c.key] === undefined) {
+      valores[c.key] = c.valorFijo
+    }
+  }
+}, { immediate: true })
+
+// Al cambiar de tipo de acta, limpia los campos específicos (los comunes se quedan).
+watch(tipoActivo, (nuevo, viejo) => {
+  if (!viejo || forma.value !== 'ramificado') return
+  for (const c of normalizarCampos(esquema.value.tipos?.[viejo]?.campos)) delete valores[c.key]
+})
+
+// Persiste el borrador conforme se escribe (con debounce), para reanudar
+// el formulario a medio llenar tras recargar.
+function snapshotBorrador() {
+  return { valores: { ...valores }, modoActivo: modoActivo.value, tipoActivo: tipoActivo.value }
+}
+let draftTimer = null
+watch([valores, modoActivo, tipoActivo], () => {
+  clearTimeout(draftTimer)
+  draftTimer = setTimeout(() => atencion.guardarBorrador(snapshotBorrador()), 400)
+}, { deep: true })
+// Flush al salir del paso, para no perder los últimos ms de captura.
+onBeforeUnmount(() => {
+  clearTimeout(draftTimer)
+  atencion.guardarBorrador(snapshotBorrador())
+})
+
+// Limpia el formulario (vacía los inputs; conserva el modo/tipo seleccionado).
+function limpiar() {
+  for (const k of Object.keys(valores)) delete valores[k]
+  for (const c of camposActivos.value) {
+    if (c.oculto && c.valorFijo !== null && c.valorFijo !== undefined) valores[c.key] = c.valorFijo
+  }
+}
+const puedeLimpiar = computed(() =>
+  camposActivosVis.value.some((c) => {
+    const v = valores[c.key]
+    return v !== undefined && v !== null && v !== ''
+  })
+)
+
+// Errores por campo (para resaltar).
+const faltantesKeys = computed(() => new Set(validarCampos(camposActivos.value, valores).map((c) => c.key)))
+function esInvalido(c) {
+  return props.mostrarErrores && faltantesKeys.value.has(c.key)
+}
+
+// --- API expuesta al padre (CaptureView) ---
+function validar() {
+  const faltan = validarCampos(camposActivos.value, valores)
+  const faltaTipo = forma.value === 'ramificado' && !tipoActivo.value
+  return { ok: faltan.length === 0 && !faltaTipo && forma.value !== 'vacio', faltaTipo }
+}
+
+function construir() {
+  const extra = {}
+  if (forma.value === 'modos') extra.modo = modoActivo.value
+  if (forma.value === 'ramificado' && selectorTipo.value) extra[selectorTipo.value.key] = tipoActivo.value
+
+  const datos = construirDatos(camposActivos.value, valores, extra)
+
+  // CURP en espejo: el campo tipo curp también va al nivel raíz del body.
+  const curpCampo = camposActivos.value.find((c) => c.tipo === 'curp')
+  const curp = curpCampo ? String(valores[curpCampo.key] || '').toUpperCase() : ''
+
+  // Teléfono capturado (para prefill de WhatsApp en el ticket).
+  const telefono = valorTelefono(camposActivos.value, valores)
+
+  return { datos, curp, telefono, resumen: construirResumen() }
+}
+
+// Resumen legible para la pantalla de revisión.
+function construirResumen() {
+  const filas = []
+  if (forma.value === 'modos' && modos.value.length > 1) {
+    const m = modos.value.find((x) => x.key === modoActivo.value)
+    if (m) filas.push({ label: 'Modo de búsqueda', valor: m.label })
+  }
+  if (forma.value === 'ramificado' && selectorTipo.value) {
+    const op = tiposOpciones.value.find((o) => o.valor === tipoActivo.value)
+    filas.push({ label: selectorTipo.value.label, valor: op ? op.label : tipoActivo.value })
+  }
+  for (const c of camposActivos.value) {
+    if (c.oculto) continue
+    let v = valores[c.key]
+    if (c.tipo === 'select') { const op = c.opciones.find((o) => o.valor === v); v = op ? op.label : v }
+    filas.push({ label: c.label, valor: v === undefined || v === '' ? '—' : String(v) })
+  }
+  return filas
+}
+
+defineExpose({ validar, construir })
 </script>
 
 <template>
   <section>
     <header class="step-head">
-      <h2 class="step-title">Captura de datos</h2>
-      <p class="step-desc">{{ tramite?.nombre }}</p>
+      <div class="step-head__main">
+        <h2 class="step-title">Captura de datos</h2>
+        <p class="step-desc">{{ tramite?.nombre }}</p>
+        <div v-if="esquema?.gratuito || esquema?.documentoExterno" class="badges">
+          <span v-if="esquema?.gratuito" class="c-badge c-badge--success">Gratuito</span>
+          <span v-if="esquema?.documentoExterno" class="c-badge c-badge--info">Documento externo</span>
+        </div>
+      </div>
+      <button v-if="forma !== 'vacio'" class="c-btn c-btn--ghost c-btn--sm" type="button"
+        @click="limpiar" :disabled="!puedeLimpiar" title="Vaciar el formulario">
+        <AppIcon name="trash" :size="16" />
+        <span>Limpiar</span>
+      </button>
     </header>
 
-    <div v-if="sinCaptura" class="c-alert c-alert--info">
-      Este trámite no requiere captura adicional; los datos se obtienen de los servicios externos.
+    <div v-if="forma === 'vacio'" class="c-alert c-alert--warning">
+      Este trámite aún no tiene captura definida.
     </div>
 
-    <div class="form-grid">
-      <!-- CURP -->
-      <div v-if="requiereCurp" class="c-field form-grid__full">
-        <label class="c-label" for="curp">CURP</label>
-        <input
-          id="curp" class="c-input" v-model="atencion.curp" maxlength="18"
-          placeholder="18 caracteres" :class="{ 'is-invalid': mostrarErrores && curpMal }"
-          @input="atencion.curp = atencion.curp.toUpperCase()"
-        />
-        <span v-if="mostrarErrores && curpMal" class="c-hint u-text-danger">CURP inválida (18 caracteres).</span>
+    <!-- Forma 1: Modos -->
+    <template v-else-if="forma === 'modos'">
+      <div v-if="modos.length > 1" class="modo-tabs">
+        <button v-for="m in modos" :key="m.key" type="button" class="modo-tab"
+          :class="{ 'modo-tab--active': modoActivo === m.key }" @click="modoActivo = m.key">{{ m.label }}</button>
+      </div>
+      <div class="form-grid">
+        <CampoDinamico v-for="c in camposActivosVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
+      </div>
+    </template>
+
+    <!-- Forma 2: Ramificado -->
+    <template v-else-if="forma === 'ramificado'">
+      <div class="form-grid">
+        <CampoDinamico v-for="c in camposComunesVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
       </div>
 
-      <!-- Campos dinámicos -->
-      <div
-        v-for="c in campos" :key="c.clave" class="c-field"
-        :class="{ 'form-grid__full': c.tipo === 'textarea' }"
-      >
-        <label class="c-label" :for="`f_${c.clave}`">
-          {{ c.etiqueta }}<span v-if="c.requerido" class="req">*</span>
-        </label>
-
-        <select v-if="c.tipo === 'select'" :id="`f_${c.clave}`" class="c-select"
-          v-model="atencion.datos[c.clave]" :class="{ 'is-invalid': esInvalido(c.clave) }">
+      <div class="c-field selector-tipo">
+        <label class="c-label" for="selTipo">{{ selectorTipo.label }}<span class="req">*</span></label>
+        <select id="selTipo" class="c-select" v-model="tipoActivo" :class="{ 'is-invalid': mostrarErrores && !tipoActivo }">
           <option value="" disabled>Selecciona…</option>
-          <option v-for="op in c.opciones" :key="op.valor" :value="op.valor">{{ op.etiqueta }}</option>
+          <option v-for="op in tiposOpciones" :key="String(op.valor)" :value="op.valor">{{ op.label }}</option>
         </select>
-
-        <textarea v-else-if="c.tipo === 'textarea'" :id="`f_${c.clave}`" class="c-textarea"
-          v-model="atencion.datos[c.clave]" :placeholder="c.placeholder" :class="{ 'is-invalid': esInvalido(c.clave) }" />
-
-        <label v-else-if="c.tipo === 'checkbox'" class="check-row">
-          <input type="checkbox" v-model="atencion.datos[c.clave]" />
-          <span>{{ c.placeholder || 'Sí' }}</span>
-        </label>
-
-        <input v-else :id="`f_${c.clave}`" class="c-input" :type="c.tipo"
-          v-model="atencion.datos[c.clave]" :placeholder="c.placeholder"
-          :maxlength="c.max || undefined" :class="{ 'is-invalid': esInvalido(c.clave) }" />
-
-        <span v-if="c.ayuda" class="c-hint">{{ c.ayuda }}</span>
-        <span v-if="esInvalido(c.clave)" class="c-hint u-text-danger">Este campo es obligatorio.</span>
+        <span v-if="mostrarErrores && !tipoActivo" class="c-hint u-text-danger">Selecciona una opción.</span>
       </div>
-    </div>
+
+      <div v-if="tipoActivo" class="form-grid">
+        <CampoDinamico v-for="c in camposTipoVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
+      </div>
+    </template>
+
+    <!-- Forma 3: Simple -->
+    <template v-else>
+      <div class="form-grid">
+        <CampoDinamico v-for="c in camposActivosVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
+      </div>
+    </template>
+
+    <!-- Ayuda de consulta CURP (solo en el trámite de consulta de CURP) -->
+    <ConsultaCurp v-if="esConsultaCurp" />
   </section>
 </template>
 
 <style scoped>
-.step-head { margin-bottom: var(--spacing-2xl); }
+.step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-lg); margin-bottom: var(--spacing-2xl); }
+.step-head__main { min-width: 0; }
 .step-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); }
 .step-desc { margin: var(--spacing-xs) 0 0; color: var(--text-tertiary); font-size: var(--font-size-md); }
+.badges { display: flex; gap: var(--spacing-sm); margin-top: var(--spacing-sm); }
+
 .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-lg) var(--spacing-2xl); }
-.form-grid__full { grid-column: 1 / -1; }
-.req { color: var(--danger-color); margin-left: 2px; }
-.check-row { display: flex; align-items: center; gap: var(--spacing-sm); min-height: 48px; cursor: pointer; }
-.check-row input { width: 20px; height: 20px; }
 @media (max-width: 767.98px) { .form-grid { grid-template-columns: 1fr; } }
+
+.req { color: var(--danger-color); margin-left: 2px; }
+
+.modo-tabs { display: flex; gap: 4px; padding: 4px; background: var(--bg-tertiary); border-radius: var(--border-radius-md); margin-bottom: var(--spacing-xl); width: fit-content; }
+.modo-tab { min-height: 44px; padding: 0 var(--spacing-xl); border: none; background: transparent; cursor: pointer; border-radius: var(--border-radius-sm); font-weight: var(--font-weight-medium); color: var(--text-secondary); }
+.modo-tab--active { background: var(--bg-primary); color: var(--primary-color); box-shadow: var(--shadow-xs); }
+
+.selector-tipo { max-width: 420px; margin: var(--spacing-xl) 0; }
 </style>

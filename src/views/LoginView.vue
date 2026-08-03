@@ -10,11 +10,11 @@ const route = useRoute()
 const auth = useAuthStore()
 const ui = useUiStore()
 
-const form = reactive({ metodo: 'correo', usuario: '', contrasena: '' })
+// Por ahora solo login por correo (el método por número de empleado está
+// desactivado en el backend).
+const form = reactive({ usuario: '', contrasena: '' })
 const cargando = ref(false)
 
-const usuarioLabel = computed(() => (form.metodo === 'correo' ? 'Correo electrónico' : 'Número de empleado'))
-const usuarioType = computed(() => (form.metodo === 'correo' ? 'email' : 'text'))
 const puedeEnviar = computed(() => form.usuario.trim() && form.contrasena.trim() && !cargando.value)
 
 async function enviar() {
@@ -22,7 +22,7 @@ async function enviar() {
   cargando.value = true
   try {
     await auth.login({
-      metodo: form.metodo,
+      metodo: 'correo',
       usuario: form.usuario.trim(),
       contrasena: form.contrasena,
     })
@@ -46,26 +46,11 @@ async function enviar() {
       </div>
 
       <form class="login-form" @submit.prevent="enviar">
-        <!-- Método de identificación -->
         <div class="c-field">
-          <span class="c-label">Identificarme con</span>
-          <div class="seg">
-            <button
-              type="button" class="seg__btn" :class="{ 'seg__btn--active': form.metodo === 'correo' }"
-              @click="form.metodo = 'correo'"
-            >Correo</button>
-            <button
-              type="button" class="seg__btn" :class="{ 'seg__btn--active': form.metodo === 'empleado' }"
-              @click="form.metodo = 'empleado'"
-            >N° de empleado</button>
-          </div>
-        </div>
-
-        <div class="c-field">
-          <label class="c-label" for="usuario">{{ usuarioLabel }}</label>
+          <label class="c-label" for="usuario">Correo electrónico</label>
           <input
-            id="usuario" class="c-input" :type="usuarioType" v-model="form.usuario"
-            autocomplete="username" :placeholder="usuarioLabel" required
+            id="usuario" class="c-input" type="email" v-model="form.usuario"
+            autocomplete="username" placeholder="Correo electrónico" required
           />
         </div>
 
@@ -97,14 +82,4 @@ async function enviar() {
 .login-title { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); }
 .login-sub { margin: var(--spacing-sm) 0 0; color: var(--text-tertiary); font-size: var(--font-size-base); }
 .login-form { display: flex; flex-direction: column; gap: var(--spacing-lg); }
-
-/* Segmented control para el método */
-.seg { display: flex; gap: 4px; padding: 4px; background: var(--bg-tertiary); border-radius: var(--border-radius-md); }
-.seg__btn {
-  flex: 1 1 0; min-height: 44px; border: none; background: transparent; cursor: pointer;
-  border-radius: var(--border-radius-sm); font-weight: var(--font-weight-medium);
-  color: var(--text-secondary); font-size: var(--font-size-base);
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.seg__btn--active { background: var(--bg-primary); color: var(--primary-color); box-shadow: var(--shadow-xs); }
 </style>

@@ -15,8 +15,8 @@ export async function seleccionarTramite(id, tramiteId) {
 }
 
 // 3. PUT /api/atenciones/{id}/datos  { curp?, datos } (puede llamarse varias veces)
-export async function guardarDatos(id, { curp, datos }) {
-  const res = await http.put(`/api/atenciones/${id}/datos`, { curp, datos })
+export async function guardarDatos(id, payload) {
+  const res = await http.put(`/api/atenciones/${id}/datos`, payload)
   return unwrap(res)
 }
 
@@ -26,14 +26,24 @@ export async function finalizarCaptura(id) {
   return unwrap(res)
 }
 
-// 5. POST /api/atenciones/{id}/ticket  { medioEntrega, monto? } → folio + ticket
-export async function generarTicket(id, { medioEntrega, monto }) {
-  const res = await http.post(`/api/atenciones/${id}/ticket`, { medioEntrega, monto })
+// 5. POST /api/atenciones/{id}/ticket  { medioEntrega, telefono? } → folio + ticket
+//    (El monto lo determina el backend; el front no lo envía.)
+export async function generarTicket(id, payload) {
+  const res = await http.post(`/api/atenciones/${id}/ticket`, payload)
   return unwrap(res)
 }
 
 // Alterno: POST /api/atenciones/{id}/cancelar  (solo antes del ticket)
 export async function cancelarAtencion(id) {
   const res = await http.post(`/api/atenciones/${id}/cancelar`)
+  return unwrap(res)
+}
+
+// GET /api/atenciones?pagina=&tamano=&estado=  → listado paginado del facilitador.
+// Devuelve { items, pagina, tamanoPagina, totalItems, totalPaginas, tieneAnterior, tieneSiguiente }
+export async function listarAtenciones({ pagina = 1, tamano = 20, estado } = {}) {
+  const params = { pagina, tamano }
+  if (estado) params.estado = estado
+  const res = await http.get('/api/atenciones', { params })
   return unwrap(res)
 }

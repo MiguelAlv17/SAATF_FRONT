@@ -45,14 +45,20 @@ function elegir(t) {
     <div v-else class="select-grid">
       <button
         v-for="t in tramites" :key="t.tramiteId" type="button"
-        class="select-card" :class="{ 'is-selected': modelValue?.tramiteId === t.tramiteId }"
+        class="select-card"
+        :class="{ 'is-selected': modelValue?.tramiteId === t.tramiteId, 'is-disabled': !t.esquemaCampos }"
+        :disabled="!t.esquemaCampos"
         @click="elegir(t)"
       >
         <span class="select-card__title">{{ t.nombre }}</span>
         <span class="select-card__meta">
-          <span v-if="t.requiereCurp" class="c-badge c-badge--neutral">CURP</span>
-          <span v-if="t.requiereActa" class="c-badge c-badge--neutral">Acta</span>
-          <span v-if="t.capturaPropia" class="c-badge c-badge--accent">Formulario</span>
+          <span v-if="!t.esquemaCampos" class="c-badge c-badge--warning">No disponible</span>
+          <template v-else>
+            <span v-if="t.requiereCurp" class="c-badge c-badge--neutral">CURP</span>
+            <span v-if="t.requiereActa" class="c-badge c-badge--neutral">Acta</span>
+            <span v-if="t.capturaPropia" class="c-badge c-badge--accent">Formulario</span>
+            <span v-if="t.esquemaCampos?.gratuito" class="c-badge c-badge--success">Gratuito</span>
+          </template>
         </span>
       </button>
     </div>

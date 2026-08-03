@@ -2,10 +2,12 @@
 import { computed } from 'vue'
 import { useAtencionStore } from '../../stores/atencion'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import TicketPrint from '../../components/TicketPrint.vue'
 import { formatFechaHora, formatMonto } from '../../utils/format'
 
 const props = defineProps({
-  // Formulario compartido con el padre: { medio, monto, telefono }
+  // Formulario compartido con el padre: { medio, telefono }
+  // (El monto lo determina el backend; no se captura en el front.)
   form: { type: Object, required: true },
   mostrarErrores: { type: Boolean, default: false },
 })
@@ -23,7 +25,7 @@ function imprimir() {
 
 <template>
   <section>
-    <!-- ANTES de emitir: elegir medio + monto -->
+    <!-- ANTES de emitir: elegir medio de entrega -->
     <template v-if="!emitido">
       <header class="step-head">
         <h2 class="step-title">Generar folio</h2>
@@ -43,18 +45,12 @@ function imprimir() {
         </button>
       </div>
 
-      <div class="form-row u-mt-5">
-        <div v-if="form.medio === 'whatsapp'" class="c-field">
+      <div v-if="form.medio === 'whatsapp'" class="form-row u-mt-5">
+        <div class="c-field">
           <label class="c-label" for="tel">Teléfono (10 dígitos)</label>
           <input id="tel" class="c-input" type="tel" v-model="form.telefono" maxlength="10"
             placeholder="55 0000 0000" :class="{ 'is-invalid': mostrarErrores && telefonoMal }" />
           <span class="c-hint">No se almacena; solo se usa para enviar el ticket.</span>
-        </div>
-
-        <div class="c-field">
-          <label class="c-label" for="monto">Monto a cobrar (opcional)</label>
-          <input id="monto" class="c-input" type="number" min="0" step="0.01" v-model="form.monto" placeholder="0.00" />
-          <span class="c-hint">Déjalo vacío si el monto se define por otra regla.</span>
         </div>
       </div>
     </template>
@@ -74,7 +70,7 @@ function imprimir() {
           <div><span>Válido hasta</span><strong>{{ formatFechaHora(atencion.vigenciaHasta) }}</strong></div>
         </div>
 
-        <button v-if="form.medio === 'impresion'" class="c-btn c-btn--primary c-btn--lg u-mt-4 no-print" type="button" @click="imprimir">
+        <button v-if="atencion.ticketMedio === 'impresion'" class="c-btn c-btn--primary c-btn--lg u-mt-4 no-print" type="button" @click="imprimir">
           <AppIcon name="print" :size="18" /> Imprimir ticket
         </button>
         <div v-else class="c-alert c-alert--success u-mt-4 no-print">
@@ -83,14 +79,12 @@ function imprimir() {
       </div>
 
       <!-- Bloque solo para impresión -->
-      <div class="print-only ticket-print">
-        <h2>SAATF — Ticket de atención</h2>
-        <p class="ticket-print__folio">{{ atencion.folio }}</p>
-        <p>Trámite: {{ atencion.ticket?.tramite || atencion.tramite?.nombre }}</p>
-        <p>Monto: {{ formatMonto(atencion.monto) }}</p>
-        <p>Válido hasta: {{ formatFechaHora(atencion.vigenciaHasta) }}</p>
-        <p class="ticket-print__hint">Presenta este folio en el kiosco antes de la hora de vigencia.</p>
-      </div>
+      <TicketPrint
+        :folio="atencion.folio"
+        :tramite="atencion.ticket?.tramite || atencion.tramite?.nombre"
+        :monto="atencion.monto"
+        :vigencia-hasta="atencion.vigenciaHasta"
+      />
     </template>
   </section>
 </template>
@@ -110,8 +104,4 @@ function imprimir() {
 .ticket-meta div { display: flex; flex-direction: column; gap: 2px; }
 .ticket-meta span { font-size: var(--font-size-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); }
 .ticket-meta strong { font-size: var(--font-size-lg); color: var(--text-primary); }
-
-.ticket-print { text-align: center; font-family: var(--font-family-mono); padding: 12px; }
-.ticket-print__folio { font-size: 40px; font-weight: bold; letter-spacing: 0.15em; margin: 12px 0; }
-.ticket-print__hint { margin-top: 16px; font-size: 12px; }
 </style>
