@@ -146,6 +146,11 @@ async function confirmarCancelar() {
   }
 }
 
+// Si desde el listado se canceló la atención que está activa en el wizard, reinícialo.
+function onAtencionCancelada(atencionId) {
+  if (atencionId === atencion.atencionId) reiniciar()
+}
+
 async function cerrarSesion({ porInactividad = false } = {}) {
   // Limpia la atención local (privacidad en tablet compartida).
   atencion.reset()
@@ -228,7 +233,7 @@ async function cerrarSesion({ porInactividad = false } = {}) {
   </AppModal>
 
   <!-- Listado de atenciones -->
-  <AtencionesModal v-model="verAtenciones" />
+  <AtencionesModal v-model="verAtenciones" @cancelada="onAtencionCancelada" />
 </template>
 
 <style scoped>

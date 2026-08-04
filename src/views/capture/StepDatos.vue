@@ -118,6 +118,31 @@ const puedeLimpiar = computed(() =>
   })
 )
 
+// --- Reutilizar datos del solicitante en los campos del tipo (Actas) ---
+// Solo para tipos con campos de nombre propios (matrimonio / nacimiento por datos).
+const REUSO = {
+  tipos: ['matrimonio', 'nacimiento_datos'],
+  mapa: [
+    ['solicitante.nombre', 'nombre'],
+    ['solicitante.apPaterno', 'primerApellido'],
+    ['solicitante.apMaterno', 'segundoApellido'],
+  ],
+}
+const noVacio = (v) => v !== undefined && v !== null && String(v).trim() !== ''
+const mostrarReuso = computed(() =>
+  forma.value === 'ramificado' && REUSO.tipos.includes(tipoActivo.value)
+)
+const puedeReutilizar = computed(() => {
+  if (!mostrarReuso.value) return false
+  const hayFuente = REUSO.mapa.some(([src]) => noVacio(valores[src]))
+  const destinosVacios = REUSO.mapa.every(([, dst]) => !noVacio(valores[dst]))
+  return hayFuente && destinosVacios
+})
+function reutilizar() {
+  if (!puedeReutilizar.value) return
+  for (const [src, dst] of REUSO.mapa) valores[dst] = valores[src] ?? ''
+}
+
 // Errores por campo (para resaltar).
 const faltantesKeys = computed(() => new Set(validarCampos(camposActivos.value, valores).map((c) => c.key)))
 function esInvalido(c) {
@@ -148,24 +173,42 @@ function construir() {
   return { datos, curp, telefono, resumen: construirResumen() }
 }
 
-// Resumen legible para la pantalla de revisión.
+// Una fila { label, valor } a partir de un campo (resuelve label de selects).
+function fila(c) {
+  let v = valores[c.key]
+  if (c.tipo === 'select') { const op = c.opciones.find((o) => o.valor === v); v = op ? op.label : v }
+  return { label: c.label, valor: v === undefined || v === '' ? '—' : String(v) }
+}
+// ¿El campo pertenece al solicitante? (por convención de la llave)
+function esSolicitante(key) {
+  return key === 'solicitante' || String(key).startsWith('solicitante.')
+}
+
+// Resumen agrupado para la pantalla de revisión: separa "Solicitante" de
+// "Datos del trámite" para que se distingan a simple vista.
 function construirResumen() {
-  const filas = []
+  const solicitante = []
+  const tramite = []
+
+  // El modo / tipo de acta van en "Datos del trámite".
   if (forma.value === 'modos' && modos.value.length > 1) {
     const m = modos.value.find((x) => x.key === modoActivo.value)
-    if (m) filas.push({ label: 'Modo de búsqueda', valor: m.label })
+    if (m) tramite.push({ label: 'Modo de búsqueda', valor: m.label })
   }
   if (forma.value === 'ramificado' && selectorTipo.value) {
     const op = tiposOpciones.value.find((o) => o.valor === tipoActivo.value)
-    filas.push({ label: selectorTipo.value.label, valor: op ? op.label : tipoActivo.value })
+    tramite.push({ label: selectorTipo.value.label, valor: op ? op.label : tipoActivo.value })
   }
+
   for (const c of camposActivos.value) {
     if (c.oculto) continue
-    let v = valores[c.key]
-    if (c.tipo === 'select') { const op = c.opciones.find((o) => o.valor === v); v = op ? op.label : v }
-    filas.push({ label: c.label, valor: v === undefined || v === '' ? '—' : String(v) })
+    ;(esSolicitante(c.key) ? solicitante : tramite).push(fila(c))
   }
-  return filas
+
+  const secciones = []
+  if (solicitante.length) secciones.push({ titulo: 'Solicitante', filas: solicitante })
+  secciones.push({ titulo: 'Datos del trámite', filas: tramite })
+  return secciones
 }
 
 defineExpose({ validar, construir })
@@ -219,6 +262,14 @@ defineExpose({ validar, construir })
         <span v-if="mostrarErrores && !tipoActivo" class="c-hint u-text-danger">Selecciona una opción.</span>
       </div>
 
+      <div v-if="mostrarReuso" class="reuso-bar">
+        <button class="c-btn c-btn--outline c-btn--sm" type="button" @click="reutilizar" :disabled="!puedeReutilizar"
+          title="Copiar nombre y apellidos del solicitante a estos campos">
+          <AppIcon name="copy" :size="16" />
+          <span>Reutilizar información de arriba</span>
+        </button>
+      </div>
+
       <div v-if="tipoActivo" class="form-grid">
         <CampoDinamico v-for="c in camposTipoVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
       </div>
@@ -253,4 +304,5 @@ defineExpose({ validar, construir })
 .modo-tab--active { background: var(--bg-primary); color: var(--primary-color); box-shadow: var(--shadow-xs); }
 
 .selector-tipo { max-width: 420px; margin: var(--spacing-xl) 0; }
+.reuso-bar { margin-bottom: var(--spacing-lg); }
 </style>

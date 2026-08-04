@@ -1,7 +1,7 @@
 <script setup>
 // Listado de atenciones del facilitador (modal con lista de cards).
 import { ref, reactive, watch, nextTick } from 'vue'
-import { listarAtenciones } from '../services/atenciones.service'
+import { listarAtenciones, cancelarAtencion } from '../services/atenciones.service'
 import { useUiStore } from '../stores/ui'
 import AppIcon from './ui/AppIcon.vue'
 import TicketPrint from './TicketPrint.vue'
@@ -10,7 +10,7 @@ import { formatFechaHora, formatMonto } from '../utils/format'
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'cancelada'])
 const ui = useUiStore()
 
 const TAMANO = 20
@@ -38,11 +38,14 @@ const meta = reactive({ pagina: 1, totalItems: 0, totalPaginas: 1, tieneAnterior
 const estadoFiltro = ref('')
 const cargando = ref(false)
 const itemImprimir = ref(null)
+const confirmandoId = ref(null) // atencionId con la cancelación pendiente de confirmar
+const cancelando = ref(false)
 
 const estadoLabel = (e) => ESTADOS[e]?.label || e
 const estadoBadge = (e) => ESTADOS[e]?.badge || 'c-badge--neutral'
 
 async function cargar(pagina = 1) {
+  confirmandoId.value = null
   cargando.value = true
   try {
     const data = await listarAtenciones({ pagina, tamano: TAMANO, estado: estadoFiltro.value || undefined })
@@ -79,6 +82,22 @@ async function reimprimir(item) {
   itemImprimir.value = item
   await nextTick()
   window.print()
+}
+
+async function cancelar(item) {
+  cancelando.value = true
+  try {
+    await cancelarAtencion(item.atencionId)
+    ui.success(`Atención #${item.atencionId} cancelada.`)
+    confirmandoId.value = null
+    // Avisa al wizard por si es la atención activa (para reiniciarlo).
+    emit('cancelada', item.atencionId)
+    await cargar(meta.pagina)
+  } catch (e) {
+    ui.error(e.mensaje || 'No se pudo cancelar la atención.', e.codigo)
+  } finally {
+    cancelando.value = false
+  }
 }
 
 function cerrar() {
@@ -147,12 +166,23 @@ watch(() => props.modelValue, (abierto) => {
               </div>
 
               <div class="at-card__acciones">
-                <button v-if="it.folio" class="tbl-btn tbl-btn--primary" type="button" title="Copiar folio" @click="copiarFolio(it.folio)">
-                  <AppIcon name="copy" :size="18" />
-                </button>
-                <button v-if="it.folio" class="tbl-btn" type="button" title="Reimprimir ticket" @click="reimprimir(it)">
-                  <AppIcon name="print" :size="18" />
-                </button>
+                <!-- Confirmación inline de cancelación -->
+                <template v-if="confirmandoId === it.atencionId">
+                  <span class="at-confirm">¿Cancelar?</span>
+                  <button class="c-btn c-btn--danger c-btn--sm" type="button" :disabled="cancelando" @click="cancelar(it)">Sí</button>
+                  <button class="c-btn c-btn--secondary c-btn--sm" type="button" :disabled="cancelando" @click="confirmandoId = null">No</button>
+                </template>
+                <template v-else>
+                  <button v-if="it.folio" class="tbl-btn tbl-btn--primary" type="button" title="Copiar folio" @click="copiarFolio(it.folio)">
+                    <AppIcon name="copy" :size="18" />
+                  </button>
+                  <button v-if="it.folio" class="tbl-btn" type="button" title="Reimprimir ticket" @click="reimprimir(it)">
+                    <AppIcon name="print" :size="18" />
+                  </button>
+                  <button v-if="it.estado === 'en_captura'" class="tbl-btn tbl-btn--danger" type="button" title="Cancelar atención" @click="confirmandoId = it.atencionId">
+                    <AppIcon name="trash" :size="18" />
+                  </button>
+                </template>
               </div>
             </div>
           </div>
@@ -236,7 +266,8 @@ watch(() => props.modelValue, (abierto) => {
 .at-card__fechas span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); }
 .at-card__fechas strong { font-size: var(--font-size-sm); color: var(--text-secondary); font-weight: var(--font-weight-medium); white-space: nowrap; }
 
-.at-card__acciones { flex: 0 0 auto; display: flex; gap: var(--spacing-sm); }
+.at-card__acciones { flex: 0 0 auto; display: flex; align-items: center; gap: var(--spacing-sm); }
+.at-confirm { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--danger-dark); white-space: nowrap; }
 
 .at-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-lg); padding: var(--spacing-md) var(--spacing-2xl); border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
 .at-pag { font-size: var(--font-size-sm); color: var(--text-secondary); font-weight: var(--font-weight-medium); }
