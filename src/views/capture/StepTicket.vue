@@ -18,6 +18,11 @@ const telefonoMal = computed(() =>
   props.form.medio === 'whatsapp' && !/^\d{10}$/.test(String(props.form.telefono || '').replace(/\D/g, ''))
 )
 
+// Teléfono: solo dígitos, máximo 10.
+function onTelefono(e) {
+  props.form.telefono = e.target.value.replace(/\D/g, '').slice(0, 10)
+}
+
 function imprimir() {
   window.print()
 }
@@ -48,9 +53,10 @@ function imprimir() {
       <div v-if="form.medio === 'whatsapp'" class="form-row u-mt-5">
         <div class="c-field">
           <label class="c-label" for="tel">Teléfono (10 dígitos)</label>
-          <input id="tel" class="c-input" type="tel" v-model="form.telefono" maxlength="10"
-            placeholder="55 0000 0000" :class="{ 'is-invalid': mostrarErrores && telefonoMal }" />
-          <span class="c-hint">No se almacena; solo se usa para enviar el ticket.</span>
+          <input id="tel" class="c-input" type="tel" inputmode="numeric" :value="form.telefono" @input="onTelefono"
+            maxlength="10" placeholder="10 dígitos" :class="{ 'is-invalid': mostrarErrores && telefonoMal }" />
+          <span v-if="mostrarErrores && telefonoMal" class="c-hint u-text-danger">El teléfono debe tener 10 dígitos.</span>
+          <span v-else class="c-hint">No se almacena; solo se usa para enviar el ticket.</span>
         </div>
       </div>
     </template>

@@ -16,14 +16,25 @@ export function detectarForma(esquema) {
 // ---------------------------------------------------------------------------
 // Normalización de un campo individual
 // ---------------------------------------------------------------------------
-const TIPOS = ['texto', 'numero', 'fecha', 'select', 'curp', 'placa']
+const TIPOS = ['texto', 'numero', 'fecha', 'select', 'curp', 'placa', 'telefono']
+
+// ¿La llave/etiqueta indican un campo de teléfono?
+function esCampoTelefono(key, label) {
+  return /(^|\.)tel[eé]fono$/i.test(String(key)) || /tel[eé]fono/i.test(String(label))
+}
 
 export function normalizarCampo(raw, i = 0) {
-  const tipo = String(raw?.tipo ?? 'texto').toLowerCase()
+  const key = String(raw?.key ?? raw?.clave ?? `campo_${i}`)
+  const label = raw?.label ?? raw?.etiqueta ?? key
+  let tipo = String(raw?.tipo ?? 'texto').toLowerCase()
+  if (tipo === 'tel') tipo = 'telefono'
+  if (!TIPOS.includes(tipo)) tipo = 'texto'
+  // Un texto que "parece" teléfono se trata como teléfono (validación 10 dígitos).
+  if (tipo === 'texto' && esCampoTelefono(key, label)) tipo = 'telefono'
   return {
-    key: String(raw?.key ?? raw?.clave ?? `campo_${i}`),
-    label: raw?.label ?? raw?.etiqueta ?? String(raw?.key ?? ''),
-    tipo: TIPOS.includes(tipo) ? tipo : 'texto',
+    key,
+    label,
+    tipo,
     obligatorio: !!raw?.obligatorio,
     maxLength: raw?.maxLength ?? null,
     formato: raw?.formato ?? null,
@@ -119,6 +130,7 @@ export function validarCampos(campos, valores) {
     const vacio = v === undefined || v === null || String(v).trim() === ''
     if (c.obligatorio && vacio) { faltan.push(c); continue }
     if (c.tipo === 'curp' && !vacio && !curpValida(v)) faltan.push(c)
+    if (c.tipo === 'telefono' && !vacio && !telefonoValido(v)) faltan.push(c)
   }
   return faltan
 }
@@ -128,10 +140,16 @@ export function curpValida(curp) {
   return /^[A-Z0-9]{18}$/.test(String(curp || '').toUpperCase())
 }
 
-// Busca un valor de teléfono entre los campos capturados (por key o label),
+// Validación de teléfono: exactamente 10 dígitos.
+export function telefonoValido(tel) {
+  return /^\d{10}$/.test(String(tel || '').replace(/\D/g, ''))
+}
+
+// Busca un valor de teléfono entre los campos capturados (por tipo o key/label),
 // para reutilizarlo como número de WhatsApp en el ticket. Devuelve solo dígitos.
 export function valorTelefono(campos, valores) {
-  const c = campos.find((x) => /(^|\.)tel[eé]fono$/i.test(x.key) || /tel[eé]fono/i.test(x.label))
+  const c = campos.find((x) => x.tipo === 'telefono') ||
+    campos.find((x) => /(^|\.)tel[eé]fono$/i.test(x.key) || /tel[eé]fono/i.test(x.label))
   if (!c) return ''
   return String(valores[c.key] || '').replace(/\D/g, '').slice(0, 10)
 }
