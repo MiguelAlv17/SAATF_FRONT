@@ -16,11 +16,21 @@ export function detectarForma(esquema) {
 // ---------------------------------------------------------------------------
 // Normalización de un campo individual
 // ---------------------------------------------------------------------------
-const TIPOS = ['texto', 'numero', 'fecha', 'select', 'curp', 'placa', 'telefono']
+// Nota: "placa" NO está en la lista → se coacciona a 'texto' (se captura como
+// texto simple, sin transformación a mayúsculas).
+const TIPOS = ['texto', 'numero', 'fecha', 'select', 'curp', 'telefono']
 
 // ¿La llave/etiqueta indican un campo de teléfono?
 function esCampoTelefono(key, label) {
   return /(^|\.)tel[eé]fono$/i.test(String(key)) || /tel[eé]fono/i.test(String(label))
+}
+
+// Transformación de texto a aplicar a un campo tipo 'texto':
+//  - 'correo' (mantiene símbolos de email), 'placa' (alfanumérico), o 'nombre'.
+function transformTexto(key, label) {
+  if (/correo|e-?mail/i.test(key) || /correo|e-?mail/i.test(label)) return 'correo'
+  if (/placa/i.test(key) || /placa/i.test(label)) return 'placa'
+  return 'nombre'
 }
 
 export function normalizarCampo(raw, i = 0) {
@@ -35,6 +45,7 @@ export function normalizarCampo(raw, i = 0) {
     key,
     label,
     tipo,
+    transform: tipo === 'texto' ? transformTexto(key, label) : null,
     obligatorio: !!raw?.obligatorio,
     maxLength: raw?.maxLength ?? null,
     formato: raw?.formato ?? null,

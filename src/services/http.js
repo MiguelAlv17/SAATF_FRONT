@@ -41,6 +41,8 @@ export class ApiError extends Error {
   constructor({ status, codigo, mensaje, data }) {
     super(mensaje || 'Error de comunicación con el servicio')
     this.name = 'ApiError'
+    // La app consume `mensaje` (español); Error solo expone `message`.
+    this.mensaje = mensaje || 'Error de comunicación con el servicio'
     this.status = status ?? 0
     this.codigo = codigo ?? null
     this.data = data ?? null

@@ -1,29 +1,37 @@
 <script setup>
-// Bloque imprimible del ticket (oculto en pantalla, visible solo al imprimir).
-// Reutilizado por el paso Ticket y por la reimpresión desde el listado.
-import { formatFechaHora, formatMonto } from '../utils/format'
+// Ticket imprimible (impresora térmica 80mm). Se teletransporta a <body> para
+// que al imprimir el documento sea SOLO el ticket. Estilos en base.css (@print).
+// El "Ten un buen día" al final es texto real: obliga a la impresora a avanzar
+// el papel (los renglones en blanco de arriba sí se imprimen al haber texto después).
+import { formatFechaHora } from '../utils/format'
 
 defineProps({
   folio: { type: String, default: '' },
   tramite: { type: String, default: '' },
-  monto: { type: [Number, String], default: null },
+  solicitante: { type: String, default: '' },
   vigenciaHasta: { type: String, default: null },
 })
 </script>
 
 <template>
-  <div class="print-ticket">
-    <h2>SAATF — Ticket de atención</h2>
-    <p class="print-ticket__folio">{{ folio }}</p>
-    <p>Trámite: {{ tramite }}</p>
-    <p>Monto: {{ formatMonto(monto) }}</p>
-    <p>Válido hasta: {{ formatFechaHora(vigenciaHasta) }}</p>
-    <p class="print-ticket__hint">Presenta este folio en el kiosco antes de la hora de vigencia.</p>
-  </div>
-</template>
+  <Teleport to="body">
+    <div class="print-ticket">
+      <div class="pt-brand">* SAATF *</div>
+      <p class="pt-subtitle">Ticket de Pre-atención</p>
 
-<style scoped>
-.print-ticket h2 { font-size: 18px; margin-bottom: 8px; }
-.print-ticket p { margin: 4px 0; font-size: 13px; }
-.print-ticket__hint { margin-top: 16px !important; font-size: 12px; }
-</style>
+      <div class="pt-sep"></div>
+      <p class="pt-folio">{{ folio }}</p>
+      <div class="pt-sep"></div>
+
+      <p class="pt-line">Trámite: {{ tramite }}</p>
+      <p v-if="solicitante" class="pt-line">Solicitante: {{ solicitante }}</p>
+      <p class="pt-line">Presenta este folio en el kiosco antes de la hora de vigencia.</p>
+      <p class="pt-line">Válido hasta: {{ formatFechaHora(vigenciaHasta) }}</p>
+
+      <div class="pt-sep"></div>
+
+      <div class="pt-feed">&nbsp;<br />&nbsp;<br />&nbsp;<br />&nbsp;<br />&nbsp;<br />&nbsp;</div>
+      <p class="pt-bye">Ten un buen día</p>
+    </div>
+  </Teleport>
+</template>

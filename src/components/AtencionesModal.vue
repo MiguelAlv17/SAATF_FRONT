@@ -1,14 +1,15 @@
 <script setup>
 // Listado de atenciones del facilitador (modal con lista de cards).
-import { ref, reactive, watch, nextTick } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { listarAtenciones, cancelarAtencion } from '../services/atenciones.service'
 import { useUiStore } from '../stores/ui'
 import AppIcon from './ui/AppIcon.vue'
-import TicketPrint from './TicketPrint.vue'
 import { formatFechaHora, formatMonto } from '../utils/format'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  // Resalta con borde palpitante la atención en_captura (se abre por un 409).
+  resaltarActiva: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'cancelada'])
 const ui = useUiStore()
@@ -37,7 +38,6 @@ const items = ref([])
 const meta = reactive({ pagina: 1, totalItems: 0, totalPaginas: 1, tieneAnterior: false, tieneSiguiente: false })
 const estadoFiltro = ref('')
 const cargando = ref(false)
-const itemImprimir = ref(null)
 const confirmandoId = ref(null) // atencionId con la cancelación pendiente de confirmar
 const cancelando = ref(false)
 
@@ -78,10 +78,12 @@ async function copiarFolio(folio) {
   }
 }
 
-async function reimprimir(item) {
-  itemImprimir.value = item
-  await nextTick()
-  window.print()
+function reimprimir(item) {
+  ui.imprimirTicket({
+    folio: item.folio,
+    tramite: item.tramiteNombre,
+    vigenciaHasta: item.vigenciaHasta,
+  })
 }
 
 async function cancelar(item) {
@@ -90,9 +92,10 @@ async function cancelar(item) {
     await cancelarAtencion(item.atencionId)
     ui.success(`Atención #${item.atencionId} cancelada.`)
     confirmandoId.value = null
-    // Avisa al wizard por si es la atención activa (para reiniciarlo).
+    // Avisa al wizard (limpia localStorage y vuelve al primer paso si era la activa).
     emit('cancelada', item.atencionId)
-    await cargar(meta.pagina)
+    // Cierra el modal para dejar al usuario en el paso 1 (Trámite).
+    cerrar()
   } catch (e) {
     ui.error(e.mensaje || 'No se pudo cancelar la atención.', e.codigo)
   } finally {
@@ -139,11 +142,17 @@ watch(() => props.modelValue, (abierto) => {
 
         <!-- Lista -->
         <div class="at-body">
+          <div v-if="resaltarActiva" class="c-alert c-alert--warning at-guia">
+            <AppIcon name="alert" :size="18" />
+            <span>Ya tienes una atención en curso. Cancela la atención <strong>resaltada</strong> para poder iniciar otra.</span>
+          </div>
+
           <div v-if="cargando" class="at-state"><span class="c-spinner"></span><span>Cargando…</span></div>
           <div v-else-if="!items.length" class="at-state at-state--empty">No hay atenciones para este filtro.</div>
 
           <div v-else class="at-list">
-            <div v-for="it in items" :key="it.atencionId" class="at-card">
+            <div v-for="it in items" :key="it.atencionId" class="at-card"
+              :class="{ 'at-card--pulse': resaltarActiva && it.estado === 'en_captura' }">
               <div class="at-card__folio">
                 <span class="at-folio">{{ it.folio || '—' }}</span>
                 <span class="at-idnum">#{{ it.atencionId }}</span>
@@ -201,14 +210,6 @@ watch(() => props.modelValue, (abierto) => {
       </div>
     </div>
   </transition>
-
-  <!-- Ticket imprimible para la reimpresión -->
-  <TicketPrint v-if="itemImprimir"
-    :folio="itemImprimir.folio"
-    :tramite="itemImprimir.tramiteNombre"
-    :monto="itemImprimir.monto"
-    :vigencia-hasta="itemImprimir.vigenciaHasta"
-  />
 </template>
 
 <style scoped>
@@ -252,6 +253,22 @@ watch(() => props.modelValue, (abierto) => {
   background: var(--bg-primary); transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 .at-card:hover { box-shadow: var(--shadow-sm); border-color: var(--border-color-strong); }
+
+/* Resaltado palpitante de la atención activa (guía para cancelarla) */
+.at-guia { margin-bottom: var(--spacing-lg); align-items: center; }
+.at-card--pulse {
+  border-color: var(--danger-color);
+  animation: atPulse 1.4s ease-out infinite;
+}
+.at-card--pulse:hover { border-color: var(--danger-color); }
+@keyframes atPulse {
+  0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(220, 53, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .at-card--pulse { animation: none; box-shadow: 0 0 0 3px var(--danger-subtle); }
+}
 
 .at-card__folio { flex: 0 0 150px; display: flex; flex-direction: column; gap: 2px; }
 .at-folio { font-family: var(--font-family-mono); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--primary-color); letter-spacing: 0.04em; }

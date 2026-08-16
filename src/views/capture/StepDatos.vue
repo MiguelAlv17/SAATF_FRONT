@@ -8,9 +8,12 @@ import {
 import CampoDinamico from './CampoDinamico.vue'
 import ConsultaCurp from './ConsultaCurp.vue'
 import AppIcon from '../../components/ui/AppIcon.vue'
+import AppHelp from '../../components/ui/AppHelp.vue'
 
 const props = defineProps({
   mostrarErrores: { type: Boolean, default: false },
+  // Sección a mostrar: 'solicitante' | 'acta' (Actas) o 'datos' (los demás).
+  seccion: { type: String, default: 'datos' },
 })
 
 const atencion = useAtencionStore()
@@ -19,6 +22,12 @@ const esquema = computed(() => tramite.value?.esquemaCampos || null)
 const forma = computed(() => detectarForma(esquema.value))
 // La ayuda de consulta CURP (gob.mx) va SOLO en el trámite de consulta de CURP.
 const esConsultaCurp = computed(() => tramite.value?.clave === 'consulta_curp')
+
+const tituloSeccion = computed(() => {
+  if (props.seccion === 'solicitante') return 'Datos del solicitante'
+  if (props.seccion === 'acta') return 'Tipo de acta'
+  return 'Captura de datos'
+})
 
 // --- Estado de captura ---
 const modoActivo = ref('')
@@ -63,6 +72,13 @@ const camposActivos = computed(() => {
   return []
 })
 
+// Campos de la sección actual (para Limpiar y validar por paso).
+const camposSeccion = computed(() => {
+  if (props.seccion === 'solicitante') return camposComunes.value
+  if (props.seccion === 'acta') return camposTipo.value
+  return camposActivos.value
+})
+
 // Visibles (sin ocultos) para renderizar.
 const camposComunesVis = computed(() => camposComunes.value.filter((c) => !c.oculto))
 const camposTipoVis = computed(() => camposTipo.value.filter((c) => !c.oculto))
@@ -104,15 +120,15 @@ onBeforeUnmount(() => {
   atencion.guardarBorrador(snapshotBorrador())
 })
 
-// Limpia el formulario (vacía los inputs; conserva el modo/tipo seleccionado).
+// Limpia los campos de la sección actual (vacía inputs; re-siembra ocultos).
 function limpiar() {
-  for (const k of Object.keys(valores)) delete valores[k]
-  for (const c of camposActivos.value) {
+  for (const c of camposSeccion.value) delete valores[c.key]
+  for (const c of camposSeccion.value) {
     if (c.oculto && c.valorFijo !== null && c.valorFijo !== undefined) valores[c.key] = c.valorFijo
   }
 }
 const puedeLimpiar = computed(() =>
-  camposActivosVis.value.some((c) => {
+  camposSeccion.value.filter((c) => !c.oculto).some((c) => {
     const v = valores[c.key]
     return v !== undefined && v !== null && v !== ''
   })
@@ -151,9 +167,16 @@ function esInvalido(c) {
 
 // --- API expuesta al padre (CaptureView) ---
 function validar() {
+  if (props.seccion === 'solicitante') {
+    return { ok: validarCampos(camposComunes.value, valores).length === 0, faltaTipo: false }
+  }
+  if (props.seccion === 'acta') {
+    const faltaTipo = !tipoActivo.value
+    const faltan = validarCampos(camposTipo.value, valores)
+    return { ok: !faltaTipo && faltan.length === 0, faltaTipo }
+  }
   const faltan = validarCampos(camposActivos.value, valores)
-  const faltaTipo = forma.value === 'ramificado' && !tipoActivo.value
-  return { ok: faltan.length === 0 && !faltaTipo && forma.value !== 'vacio', faltaTipo }
+  return { ok: faltan.length === 0 && forma.value !== 'vacio', faltaTipo: false }
 }
 
 function construir() {
@@ -188,26 +211,25 @@ function esSolicitante(key) {
 // "Datos del trámite" para que se distingan a simple vista.
 function construirResumen() {
   const solicitante = []
-  const tramite = []
+  const tram = []
 
-  // El modo / tipo de acta van en "Datos del trámite".
   if (forma.value === 'modos' && modos.value.length > 1) {
     const m = modos.value.find((x) => x.key === modoActivo.value)
-    if (m) tramite.push({ label: 'Modo de búsqueda', valor: m.label })
+    if (m) tram.push({ label: 'Modo de búsqueda', valor: m.label })
   }
   if (forma.value === 'ramificado' && selectorTipo.value) {
     const op = tiposOpciones.value.find((o) => o.valor === tipoActivo.value)
-    tramite.push({ label: selectorTipo.value.label, valor: op ? op.label : tipoActivo.value })
+    tram.push({ label: selectorTipo.value.label, valor: op ? op.label : tipoActivo.value })
   }
 
   for (const c of camposActivos.value) {
     if (c.oculto) continue
-    ;(esSolicitante(c.key) ? solicitante : tramite).push(fila(c))
+    ;(esSolicitante(c.key) ? solicitante : tram).push(fila(c))
   }
 
   const secciones = []
   if (solicitante.length) secciones.push({ titulo: 'Solicitante', filas: solicitante })
-  secciones.push({ titulo: 'Datos del trámite', filas: tramite })
+  secciones.push({ titulo: 'Datos del trámite', filas: tram })
   return secciones
 }
 
@@ -218,7 +240,7 @@ defineExpose({ validar, construir })
   <section>
     <header class="step-head">
       <div class="step-head__main">
-        <h2 class="step-title">Captura de datos</h2>
+        <h2 class="step-title">{{ tituloSeccion }}</h2>
         <p class="step-desc">{{ tramite?.nombre }}</p>
         <div v-if="esquema?.gratuito || esquema?.documentoExterno" class="badges">
           <span v-if="esquema?.gratuito" class="c-badge c-badge--success">Gratuito</span>
@@ -236,54 +258,62 @@ defineExpose({ validar, construir })
       Este trámite aún no tiene captura definida.
     </div>
 
-    <!-- Forma 1: Modos -->
-    <template v-else-if="forma === 'modos'">
-      <div v-if="modos.length > 1" class="modo-tabs">
-        <button v-for="m in modos" :key="m.key" type="button" class="modo-tab"
-          :class="{ 'modo-tab--active': modoActivo === m.key }" @click="modoActivo = m.key">{{ m.label }}</button>
-      </div>
-      <div class="form-grid">
-        <CampoDinamico v-for="c in camposActivosVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
-      </div>
-    </template>
-
-    <!-- Forma 2: Ramificado -->
-    <template v-else-if="forma === 'ramificado'">
+    <!-- Sección: Solicitante (Actas) -->
+    <template v-else-if="seccion === 'solicitante'">
       <div class="form-grid">
         <CampoDinamico v-for="c in camposComunesVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
       </div>
-
-      <div class="c-field selector-tipo">
-        <label class="c-label" for="selTipo">{{ selectorTipo.label }}<span class="req">*</span></label>
-        <select id="selTipo" class="c-select" v-model="tipoActivo" :class="{ 'is-invalid': mostrarErrores && !tipoActivo }">
-          <option value="" disabled>Selecciona…</option>
-          <option v-for="op in tiposOpciones" :key="String(op.valor)" :value="op.valor">{{ op.label }}</option>
-        </select>
-        <span v-if="mostrarErrores && !tipoActivo" class="c-hint u-text-danger">Selecciona una opción.</span>
-      </div>
-
-      <div v-if="mostrarReuso" class="reuso-bar">
-        <button class="c-btn c-btn--outline c-btn--sm" type="button" @click="reutilizar" :disabled="!puedeReutilizar"
-          title="Copiar nombre y apellidos del solicitante a estos campos">
-          <AppIcon name="copy" :size="16" />
-          <span>Reutilizar información de arriba</span>
-        </button>
-      </div>
-
-      <div v-if="tipoActivo" class="form-grid">
-        <CampoDinamico v-for="c in camposTipoVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
-      </div>
     </template>
 
-    <!-- Forma 3: Simple -->
+    <!-- Sección: Tipo de acta (Actas) -->
+    <template v-else-if="seccion === 'acta'">
+      <div class="c-field">
+        <label class="c-label">{{ selectorTipo?.label }}<span class="req">*</span></label>
+        <div class="tipo-grid">
+          <button v-for="op in tiposOpciones" :key="String(op.valor)" type="button"
+            class="select-card tipo-card" :class="{ 'is-selected': tipoActivo === op.valor }"
+            @click="tipoActivo = op.valor">
+            <span class="select-card__title">{{ op.label }}</span>
+          </button>
+        </div>
+        <span v-if="mostrarErrores && !tipoActivo" class="c-hint u-text-danger">Selecciona el tipo de acta.</span>
+      </div>
+
+      <template v-if="tipoActivo">
+        <div v-if="mostrarReuso" class="reuso-bar">
+          <button class="c-btn c-btn--outline c-btn--sm" type="button" @click="reutilizar" :disabled="!puedeReutilizar">
+            <AppIcon name="copy" :size="16" />
+            <span>Reutilizar datos del solicitante</span>
+          </button>
+          <AppHelp>
+            El botón «Reutilizar datos del solicitante» vuelve a escribir aquí el nombre y apellidos
+            que capturaste en el paso anterior (Solicitante). Si ya escribiste algo abajo, se deshabilita.
+          </AppHelp>
+        </div>
+
+        <div class="form-grid">
+          <CampoDinamico v-for="c in camposTipoVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
+        </div>
+      </template>
+    </template>
+
+    <!-- Sección: Datos (modos / simple, no ramificado) -->
     <template v-else>
-      <div class="form-grid">
+      <template v-if="forma === 'modos'">
+        <div v-if="modos.length > 1" class="modo-tabs">
+          <button v-for="m in modos" :key="m.key" type="button" class="modo-tab"
+            :class="{ 'modo-tab--active': modoActivo === m.key }" @click="modoActivo = m.key">{{ m.label }}</button>
+        </div>
+        <div class="form-grid">
+          <CampoDinamico v-for="c in camposActivosVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
+        </div>
+      </template>
+      <div v-else class="form-grid">
         <CampoDinamico v-for="c in camposActivosVis" :key="c.key" :campo="c" :valores="valores" :invalido="esInvalido(c)" />
       </div>
-    </template>
 
-    <!-- Ayuda de consulta CURP (solo en el trámite de consulta de CURP) -->
-    <ConsultaCurp v-if="esConsultaCurp" />
+      <ConsultaCurp v-if="esConsultaCurp" />
+    </template>
   </section>
 </template>
 
@@ -303,6 +333,9 @@ defineExpose({ validar, construir })
 .modo-tab { min-height: 44px; padding: 0 var(--spacing-xl); border: none; background: transparent; cursor: pointer; border-radius: var(--border-radius-sm); font-weight: var(--font-weight-medium); color: var(--text-secondary); }
 .modo-tab--active { background: var(--bg-primary); color: var(--primary-color); box-shadow: var(--shadow-xs); }
 
-.selector-tipo { max-width: 420px; margin: var(--spacing-xl) 0; }
-.reuso-bar { margin-bottom: var(--spacing-lg); }
+/* Botones de tipo de acta */
+.tipo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-xs); }
+.tipo-card { min-height: 68px; justify-content: center; }
+
+.reuso-bar { display: flex; align-items: center; gap: var(--spacing-sm); margin: var(--spacing-xl) 0 var(--spacing-lg); }
 </style>

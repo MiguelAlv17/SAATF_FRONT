@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useAtencionStore } from '../../stores/atencion'
+import { useUiStore } from '../../stores/ui'
 import AppIcon from '../../components/ui/AppIcon.vue'
-import TicketPrint from '../../components/TicketPrint.vue'
-import { formatFechaHora, formatMonto } from '../../utils/format'
+import { formatFechaHora } from '../../utils/format'
 
 const props = defineProps({
   // Formulario compartido con el padre: { medio, telefono }
@@ -13,6 +13,7 @@ const props = defineProps({
 })
 
 const atencion = useAtencionStore()
+const ui = useUiStore()
 const emitido = computed(() => !!atencion.folio)
 const telefonoMal = computed(() =>
   props.form.medio === 'whatsapp' && !/^\d{10}$/.test(String(props.form.telefono || '').replace(/\D/g, ''))
@@ -23,8 +24,22 @@ function onTelefono(e) {
   props.form.telefono = e.target.value.replace(/\D/g, '').slice(0, 10)
 }
 
+// Nombre del solicitante desde los datos capturados (Actas: objeto solicitante;
+// Constancia: cadena; CURP: no aplica).
+function nombreSolicitante() {
+  const s = atencion.datos?.solicitante
+  if (!s) return ''
+  if (typeof s === 'string') return s
+  return [s.nombre, s.apPaterno, s.apMaterno].filter(Boolean).join(' ')
+}
+
 function imprimir() {
-  window.print()
+  ui.imprimirTicket({
+    folio: atencion.folio,
+    tramite: atencion.ticket?.tramite || atencion.tramite?.nombre,
+    solicitante: nombreSolicitante(),
+    vigenciaHasta: atencion.vigenciaHasta,
+  })
 }
 </script>
 
@@ -72,7 +87,6 @@ function imprimir() {
 
         <div class="ticket-meta">
           <div><span>Trámite</span><strong>{{ atencion.ticket?.tramite || atencion.tramite?.nombre }}</strong></div>
-          <div><span>Monto</span><strong>{{ formatMonto(atencion.monto) }}</strong></div>
           <div><span>Válido hasta</span><strong>{{ formatFechaHora(atencion.vigenciaHasta) }}</strong></div>
         </div>
 
@@ -83,14 +97,6 @@ function imprimir() {
           <AppIcon name="whatsapp" :size="18" /> El ticket se envió por WhatsApp.
         </div>
       </div>
-
-      <!-- Bloque solo para impresión -->
-      <TicketPrint
-        :folio="atencion.folio"
-        :tramite="atencion.ticket?.tramite || atencion.tramite?.nombre"
-        :monto="atencion.monto"
-        :vigencia-hasta="atencion.vigenciaHasta"
-      />
     </template>
   </section>
 </template>

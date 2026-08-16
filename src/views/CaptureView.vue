@@ -1,10 +1,11 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useAtencionStore } from '../stores/atencion'
 import { useUiStore } from '../stores/ui'
 import { useInactivity } from '../composables/useInactivity'
+import { detectarForma } from '../utils/esquema'
 
 import AppTopbar from '../components/layout/AppTopbar.vue'
 import AppModal from '../components/ui/AppModal.vue'
@@ -20,28 +21,46 @@ const auth = useAuthStore()
 const atencion = useAtencionStore()
 const ui = useUiStore()
 
-const PASOS = [
-  { key: 'tramite', label: 'Trámite' },
-  { key: 'datos', label: 'Datos' },
-  { key: 'revision', label: 'Revisión' },
-  { key: 'ticket', label: 'Ticket' },
-]
+// Pasos del wizard, DINÁMICOS según el trámite. Actas (ramificado) se parte en
+// "Solicitante" y "Tipo de acta"; los demás llevan un solo paso "Datos".
+const pasos = computed(() => {
+  const f = detectarForma(atencion.tramite?.esquemaCampos)
+  const medio = f === 'ramificado'
+    ? [{ key: 'solicitante', label: 'Solicitante' }, { key: 'acta', label: 'Tipo de acta' }]
+    : [{ key: 'datos', label: 'Datos' }]
+  return [
+    { key: 'tramite', label: 'Trámite' },
+    ...medio,
+    { key: 'revision', label: 'Revisión' },
+    { key: 'ticket', label: 'Ticket' },
+  ]
+})
 
 // El paso vive en el store para poder reanudar tras recargar la página.
 const paso = computed({ get: () => atencion.paso, set: (v) => atencion.setPaso(v) })
+const pasoKey = computed(() => pasos.value[paso.value]?.key || 'tramite')
+const esPasoDatos = computed(() => ['solicitante', 'acta', 'datos'].includes(pasoKey.value))
 const tramiteSel = ref(atencion.tramite || null)
 const stepDatosRef = ref(null)
 const mostrarErrores = ref(false)
 const confirmCancel = ref(false)
 const verAtenciones = ref(false)
+const resaltarActiva = ref(false) // resalta la atención en_captura al abrir por un 409
+
+function abrirAtenciones() {
+  resaltarActiva.value = false
+  verAtenciones.value = true
+}
+// Al cerrar el listado, quita el resaltado.
+watch(verAtenciones, (v) => { if (!v) resaltarActiva.value = false })
 const ticketForm = reactive({
   medio: atencion.ticketMedio || 'impresion',
   telefono: (atencion.telefono || '').replace(/\D/g, '').slice(0, 10),
 })
 
 const emitido = computed(() => !!atencion.folio)
-const puedeCancelar = computed(() => paso.value < 3 && !emitido.value)
-const puedeAtras = computed(() => (paso.value === 1 || paso.value === 2) && !emitido.value)
+const puedeCancelar = computed(() => pasoKey.value !== 'ticket' && !emitido.value)
+const puedeAtras = computed(() => pasoKey.value !== 'tramite' && pasoKey.value !== 'ticket' && !emitido.value)
 
 // Auto-logout por inactividad.
 useInactivity(() => auth.inactividadMin, () => cerrarSesion({ porInactividad: true }))
@@ -54,10 +73,9 @@ onMounted(() => {
 })
 
 const textoAccion = computed(() => {
-  if (paso.value === 0) return 'Siguiente'
-  if (paso.value === 1) return 'Siguiente'
-  if (paso.value === 2) return 'Finalizar captura'
-  return emitido.value ? 'Nueva atención' : 'Generar folio'
+  if (pasoKey.value === 'revision') return 'Finalizar captura'
+  if (pasoKey.value === 'ticket') return emitido.value ? 'Nueva atención' : 'Generar folio'
+  return 'Siguiente'
 })
 
 function irAtras() {
@@ -67,12 +85,19 @@ function irAtras() {
 async function siguiente() {
   mostrarErrores.value = false
   try {
-    if (paso.value === 0) return await pasoTramite()
-    if (paso.value === 1) return await pasoDatos()
-    if (paso.value === 2) return await pasoRevision()
+    const k = pasoKey.value
+    if (k === 'tramite') return await pasoTramite()
+    if (k === 'solicitante') return await pasoSolicitante()
+    if (k === 'datos' || k === 'acta') return await pasoDatosFinal()
+    if (k === 'revision') return await pasoRevision()
     return await pasoTicket()
   } catch (e) {
     ui.error(e.mensaje || 'Ocurrió un error.', e.codigo)
+    // Ya hay una atención activa: abre el listado y resáltala para cancelarla.
+    if (e.codigo === 'MSG-ATF-002') {
+      resaltarActiva.value = true
+      verAtenciones.value = true
+    }
   }
 }
 
@@ -88,16 +113,28 @@ async function pasoTramite() {
   paso.value = 1
 }
 
-async function pasoDatos() {
+// Paso intermedio (Actas): valida los datos del solicitante y avanza a "Tipo de acta".
+async function pasoSolicitante() {
+  const { ok } = stepDatosRef.value.validar()
+  if (!ok) {
+    mostrarErrores.value = true
+    ui.warning('Completa los datos del solicitante.')
+    return
+  }
+  paso.value++
+}
+
+// Último paso de datos ("Datos" o "Tipo de acta"): valida, guarda y va a Revisión.
+async function pasoDatosFinal() {
   const { ok, faltaTipo } = stepDatosRef.value.validar()
   if (!ok) {
     mostrarErrores.value = true
-    ui.warning(faltaTipo ? 'Selecciona una opción para continuar.' : 'Completa los campos obligatorios.')
+    ui.warning(faltaTipo ? 'Selecciona el tipo de acta.' : 'Completa los campos obligatorios.')
     return
   }
   const { curp, datos, resumen, telefono } = stepDatosRef.value.construir()
   await atencion.guardar({ curp, datos, resumen, telefono })
-  paso.value = 2
+  paso.value++
 }
 
 async function pasoRevision() {
@@ -106,7 +143,7 @@ async function pasoRevision() {
   if (!ticketForm.telefono && atencion.telefono) {
     ticketForm.telefono = String(atencion.telefono).replace(/\D/g, '').slice(0, 10)
   }
-  paso.value = 3
+  paso.value++
 }
 
 async function pasoTicket() {
@@ -161,18 +198,18 @@ async function cerrarSesion({ porInactividad = false } = {}) {
 </script>
 
 <template>
-  <AppTopbar @logout="cerrarSesion()" @ver-atenciones="verAtenciones = true" />
+  <AppTopbar @logout="cerrarSesion()" @ver-atenciones="abrirAtenciones" />
 
   <div class="app-shell">
     <!-- Stepper -->
     <div class="stepper-bar no-print">
       <div class="stepper">
-        <template v-for="(p, i) in PASOS" :key="p.key">
+        <template v-for="(p, i) in pasos" :key="p.key">
           <div class="stepper__item" :class="{ 'stepper__item--active': i === paso, 'stepper__item--done': i < paso }">
             <span class="stepper__dot"><AppIcon v-if="i < paso" name="check" :size="16" /><span v-else>{{ i + 1 }}</span></span>
             <span class="stepper__label">{{ p.label }}</span>
           </div>
-          <span v-if="i < PASOS.length - 1" class="stepper__sep"></span>
+          <span v-if="i < pasos.length - 1" class="stepper__sep"></span>
         </template>
       </div>
     </div>
@@ -198,9 +235,9 @@ async function cerrarSesion({ porInactividad = false } = {}) {
     </div>
 
     <main class="app-main">
-      <StepTramite v-if="paso === 0" v-model="tramiteSel" />
-      <StepDatos v-else-if="paso === 1" ref="stepDatosRef" :mostrar-errores="mostrarErrores" />
-      <StepRevision v-else-if="paso === 2" />
+      <StepTramite v-if="pasoKey === 'tramite'" v-model="tramiteSel" />
+      <StepDatos v-else-if="esPasoDatos" ref="stepDatosRef" :seccion="pasoKey" :mostrar-errores="mostrarErrores" />
+      <StepRevision v-else-if="pasoKey === 'revision'" />
       <StepTicket v-else :form="ticketForm" :mostrar-errores="mostrarErrores" />
     </main>
 
@@ -210,7 +247,7 @@ async function cerrarSesion({ porInactividad = false } = {}) {
         <button v-if="puedeAtras" class="c-btn c-btn--secondary" type="button" @click="irAtras" :disabled="atencion.busy">
           <AppIcon name="arrow-left" :size="18" /> Atrás
         </button>
-        <button v-if="puedeCancelar" class="c-btn c-btn--outline-danger" type="button" @click="confirmCancel = true" :disabled="atencion.busy">
+        <button v-if="puedeCancelar" class="c-btn c-btn--outline-danger" type="button" @click="confirmCancel = true" :disabled="atencion.busy || pasoKey === 'tramite'">
           <AppIcon name="trash" :size="18" /> Cancelar
         </button>
       </div>
@@ -233,7 +270,7 @@ async function cerrarSesion({ porInactividad = false } = {}) {
   </AppModal>
 
   <!-- Listado de atenciones -->
-  <AtencionesModal v-model="verAtenciones" @cancelada="onAtencionCancelada" />
+  <AtencionesModal v-model="verAtenciones" :resaltar-activa="resaltarActiva" @cancelada="onAtencionCancelada" />
 </template>
 
 <style scoped>

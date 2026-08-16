@@ -26,6 +26,15 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: (s) => !!s.token,
     nombre: (s) => s.facilitador?.nombre || '',
     kioscoActual: (s) => s.facilitador?.kioscoActual ?? null,
+    kioscoNombre: (s) => s.facilitador?.kioscoActualNombre || '',
+    // Texto del kiosco: "ID · NOMBRE" (o solo lo que haya).
+    kioscoTexto: (s) => {
+      const id = s.facilitador?.kioscoActual
+      const nombre = s.facilitador?.kioscoActualNombre
+      if (id != null && nombre) return `${id} · ${nombre}`
+      if (id != null) return `${id}`
+      return nombre || ''
+    },
   },
   actions: {
     async login({ metodo, usuario, contrasena }) {
@@ -34,6 +43,10 @@ export const useAuthStore = defineStore('auth', {
       this.facilitador = data.facilitador || null
       this.expiracion = data.expiracion || null
       this.inactividadMin = data.inactividadMin || DEFAULT_INACTIVITY_MIN
+      // kioscoActualNombre puede venir dentro de facilitador o al nivel de data.
+      if (this.facilitador && this.facilitador.kioscoActualNombre == null && data.kioscoActualNombre != null) {
+        this.facilitador.kioscoActualNombre = data.kioscoActualNombre
+      }
       this.persist()
       return data
     },
